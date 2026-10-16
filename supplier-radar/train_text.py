@@ -141,7 +141,7 @@ def main():
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             sch.step()
-            tot += float(loss) * len(yr)
+            tot += float(loss.detach()) * len(yr)
             n += len(yr)
         print(f"epoca {ep + 1}/{a.epochs}  loss {tot / n:.4f}", flush=True)
 
@@ -149,7 +149,8 @@ def main():
         pr, pu, pe, _, _ = predict(model, tok, val["text"].tolist(), dev)
         yr, yu, ye, _, _ = encode_labels(val, events)
         print(f"\n== VALIDACION REAL ({len(val)} noticias) ==")
-        print(f"Is_Risk {np.mean(pr == yr):.0%}   Urgent(en cabeza) {np.mean(pu == yu):.0%}   Evento {np.mean(pe == ye):.0%}")
+        m = yr == 1  # la cabeza de urgencia solo se entrena (y solo importa) en noticias de riesgo
+        print(f"Is_Risk {np.mean(pr == yr):.0%}   Urgent (solo noticias de riesgo, {int(m.sum())}) {np.mean(pu[m] == yu[m]):.0%}   Evento {np.mean(pe == ye):.0%}")
     model.save(a.out, tok, events, a.base)
     print("guardado en", a.out)
 
