@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
 
 from radar.config import MODELS, TRAIN, VALID
-from radar.data import load_news, load_suppliers
+from radar.data import load_extra, load_news, load_suppliers
 from radar.matcher import Matcher
 from radar.pairs import build_pairs, ids_of
 from radar.synth import load_synth
@@ -63,6 +63,9 @@ def main():
     if a.with_val:
         real = pd.concat([real, val], ignore_index=True)
     pairs = build_pairs(load_synth(), sup, matcher, n_neg=a.neg, seed=a.seed)
+    for name, df in load_extra():  # parafrasis, reescrituras con LLM, ruido real (si se han generado)
+        pairs += build_pairs(df, sup, matcher, n_neg=a.neg, seed=a.seed)
+        print(f"  + {len(df)} noticias de {name}", flush=True)
     pairs += build_pairs(real, sup, matcher, n_neg=None) * a.real_weight  # reales: todos los pares
     random.shuffle(pairs)
     pos = sum(p[2] for p in pairs)

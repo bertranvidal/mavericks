@@ -17,7 +17,7 @@ import torch.nn.functional as F
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 
 from radar.config import DATA, MODELS, TRAIN, VALID
-from radar.data import load_news
+from radar.data import load_extra, load_news
 from radar.nn import MultiHead
 from radar.schema import DURATIONS, EVENT_TYPES, IMPACTS
 from radar.synth import load_synth
@@ -104,12 +104,11 @@ def main():
     parts = [synth] + [real] * a.real_weight
     msg = f"{len(synth)} sinteticas + {len(real)} reales x{a.real_weight}"
     if not a.no_aug:
-        aug_s = load_aug(DATA / "aug_synth.csv")
+        for name, df in load_extra():
+            parts.append(df)
+            msg += f" + {len(df)} de {name}"
         aug_r = load_aug(DATA / ("aug_real_trainval.csv" if a.with_val else "aug_real_train.csv"))
         w = max(1, a.real_weight // 2)
-        if aug_s is not None:
-            parts.append(aug_s)
-            msg += f" + {len(aug_s)} parafrasis sinteticas"
         if aug_r is not None:
             parts += [aug_r] * w
             msg += f" + {len(aug_r)} parafrasis reales x{w}"

@@ -21,6 +21,8 @@ Nunca se usa el test, el feed del directo ni el archivo de respuestas.
     python3 fetch_geo.py                     # 1 vez: regiones desde GeoNames -> data/geo_regions.json
     python3 -m radar.synth --n 3000          # datos sinteticos -> data/synthetic.csv
     python3 augment.py                       # parafrasis -> data/aug_*.csv (tarda unos minutos)
+    python3 fetch_negatives.py --n 800       # ruido real (noticias de negocio genericas) -> data/neg_news.csv
+    python3 gen_llm_data.py --n 1500         # un LLM local reescribe las sinteticas con otros estilos -> data/llm_synth.csv
     bash train_all.sh                        # 3 modelos de texto + 3 de vinculacion
     python3 evaluate.py --data holdout       # examen independiente (cuando exista el fichero)
     python3 calibrate.py                     # umbrales -> models/thresholds.json
