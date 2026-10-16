@@ -8,7 +8,7 @@ import unicodedata
 
 import pandas as pd
 
-from .knowledge import CITY_ALIASES, COUNTRY_ALIASES
+from .knowledge import COUNTRY_ALIASES, city_aliases
 
 SUFFIXES = {
     "ltd", "inc", "co", "ag", "gmbh", "sl", "sa", "sp", "z", "o", "llc", "plc", "bv", "nv",
@@ -42,6 +42,7 @@ STRENGTH = {"name": 3, "partial name": 2, "city": 2, "region": 2, "material": 2,
 class Matcher:
     def __init__(self, suppliers: pd.DataFrame):
         self.s = suppliers.reset_index(drop=True)
+        self.aliases = city_aliases()
 
     def hints(self, text: str) -> list[dict]:
         t = norm(text)
@@ -61,7 +62,7 @@ class Matcher:
             city = str(r.City)
             if has(t, city):
                 reasons.append("city")
-            for a in CITY_ALIASES.get(city, []):
+            for a in self.aliases.get(city, []):
                 if has(t, a):
                     reasons.append("region")
                     break

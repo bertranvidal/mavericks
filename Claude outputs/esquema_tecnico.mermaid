@@ -1,0 +1,35 @@
+flowchart TD
+    subgraph DATOS["DATOS"]
+        A["Noticias (Excel)<br/>News_ID, Headline, Summary"]
+        B["Proveedores y materiales<br/>40 suppliers, alternativos, inventario"]
+        C["Noticias etiquetadas<br/>train + validation (40)"]
+    end
+
+    A --> P["1. Preparación<br/>Headline + Summary en un solo texto"]
+    P --> N["2. NER ligero<br/>nombres, ciudades, regiones, países, materiales<br/>(coincidencia difusa + alias)"]
+    B --> N
+    N --> H["3. Candidatos de proveedor<br/>pistas: nombre / ciudad / región / material"]
+
+    P --> R["4. Ejemplos similares<br/>TF-IDF hoy, embeddings después"]
+    C --> R
+
+    H --> PR["5. Prompt<br/>reglas + tabla de 40 proveedores<br/>+ pistas + ejemplos etiquetados"]
+    R --> PR
+    B --> PR
+
+    PR --> L["6. LLM Qwen2.5 7B / 14B en el DGX<br/>salida JSON validada con Pydantic"]
+    L --> V["Veredicto<br/>tipo de evento, is_risk, impacto,<br/>duración, proveedores, confianza"]
+
+    V --> RU["7. Reglas deterministas<br/>sin proveedor, no hay riesgo<br/>Urgent = parada de suministro y no corta"]
+    RU --> O["SALIDA<br/>Is_Risk, Urgent, Affected_Supplier_IDs"]
+
+    O --> X["Excel de resultados<br/>4 columnas + hoja de detalle"]
+
+    B --> E["8. Extras<br/>gasto en riesgo, días de inventario,<br/>proveedor alternativo, productos afectados"]
+    O --> E
+    E --> AL["ALERTA<br/>rojo urgente / ámbar riesgo / verde sin riesgo<br/>+ explicación + acción recomendada"]
+    O --> AL
+    AL --> D["Panel Streamlit<br/>subir Excel, ver alertas, descargar resultados"]
+
+    O -. "evaluación contra validación" .-> M["Métricas<br/>accuracy Is_Risk y Urgent, F1 de proveedores"]
+    M -. "ajustar prompt y reglas" .-> PR

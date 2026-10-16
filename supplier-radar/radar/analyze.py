@@ -125,28 +125,32 @@ def rules_verdict(row: pd.Series, ctx: Context) -> Verdict:
 
 
 # ----------------------------------------------------------------------------- modo 'models' (nuestros modelos afinados)
-def finalize_models(t: dict, probs: dict, hints: dict, thr: float = 0.5) -> dict:
-    """t = salida del modelo de texto; probs = prob. de vinculacion por proveedor."""
+def finalize_models(t: dict, probs: dict, hints: dict, thr: dict | float = 0.5) -> dict:
+    """t = salida del modelo de texto; probs = prob. de vinculacion por proveedor.
+    thr = umbrales calibrados {"risk","urgent","link"} (o un numero unico)."""
+    if not isinstance(thr, dict):
+        thr = {"risk": thr, "urgent": thr, "link": thr}
     ev = t["event"]
     positive = ev == "Positive news"
-    is_risk = t["p_risk"] >= thr and not positive
-    ids = sorted(i for i, p in probs.items() if p >= thr)
+    is_risk = t["p_risk"] >= thr["risk"] and not positive
+    ids = sorted(i for i, p in probs.items() if p >= thr["link"])
     note = ""
     if is_risk and not ids:
         is_risk, note = False, "no supplier linked"
     if not is_risk and not positive:
         ids = []
-    urgent = is_risk and t["p_urgent"] >= thr
-    margin = min(abs(t["p_risk"] - 0.5), abs(t["p_urgent"] - 0.5) if is_risk else 0.5) * 2
-    top = sorted(((p, i) for i, p in probs.items() if p >= thr), reverse=True)[:3]
+    urgent = is_risk and t["p_urgent"] >= thr["urgent"]
+    margin = min(abs(t["p_risk"] - thr["risk"]) / max(thr["risk"], 1 - thr["risk"]),
+                 abs(t["p_urgent"] - thr["urgent"]) / max(thr["urgent"], 1 - thr["urgent"]) if is_risk else 1.0)
+    top = sorted(((p, i) for i, p in probs.items() if p >= thr["link"]), reverse=True)[:3]
     why = "; ".join(f"{i} {p:.2f}" + (f" ({'/'.join(hints[i])})" if i in hints else " (no direct hint)") for p, i in top)
     return {
         "Is_Risk": "Y" if is_risk else "N",
         "Urgent": "Y" if urgent else "N",
         "Affected_Supplier_IDs": "; ".join(ids),
         "Event_Type": ev,
-        "Supply_Impact": "",
-        "Duration": "",
+        "Supply_Impact": t.get("impact", "") if is_risk else "none",
+        "Duration": t.get("duration", "") if is_risk else "",
         "Confidence": "low" if note else ("high" if margin > 0.6 else "medium" if margin > 0.3 else "low"),
         "Reasoning": f"p_risk={t['p_risk']:.2f}, p_urgent={t['p_urgent']:.2f}; links: {why or 'none'}" + (f" [{note}]" if note else ""),
     }
@@ -160,7 +164,7 @@ def models_result(row: pd.Series, ctx: Context) -> dict:
     hmap = {h["id"]: h["reasons"] for h in ctx.matcher.hints(row.text)}
     sups = list(ctx.suppliers.itertuples())
     sc = m.score_links(row.text, [pair_b(x, hmap.get(x.Supplier_ID, [])) for x in sups])
-    return finalize_models(t, {x.Supplier_ID: p for x, p in zip(sups, sc)}, hmap)
+    return finalize_models(t, {x.Supplier_ID: p for x, p in zip(sups, sc)}, hmap, m.thr)
 
 
 def analyze(row: pd.Series, ctx: Context, mode: str = "llm", k: int = 6) -> tuple[dict, str]:

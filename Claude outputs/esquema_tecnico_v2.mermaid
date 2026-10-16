@@ -1,0 +1,61 @@
+flowchart TD
+    subgraph ENTRADA["1. ENTRADA"]
+        F1["Fuentes de noticias<br/>Excel hoy, RSS / API mañana"]
+        F2["Conector<br/>normaliza y elimina duplicados"]
+    end
+    F1 --> F2 --> DB1[("Base de datos<br/>SQLite hoy, Postgres mañana<br/>news")]
+
+    subgraph FILTRO["2. EMBUDO BARATO"]
+        E1["Embeddings<br/>bge-m3 / multilingual-e5"]
+        E2["Clasificador ligero<br/>relevante / irrelevante"]
+        E3["Agrupar noticias<br/>del mismo evento"]
+    end
+    DB1 --> E1 --> E2 --> E3
+    E2 -- "claramente irrelevante" --> OUTN["Resultado directo: N, N, vacío"]
+
+    subgraph NUCLEO["3. NÚCLEO DE ANÁLISIS"]
+        N1["NER ligero + alias<br/>pistas de proveedor"]
+        N2["Ejemplos similares<br/>búsqueda por embeddings"]
+        N3["Prompt + tabla de proveedores"]
+        N4["LLM local 7B<br/>JSON validado"]
+        N5{"Confianza baja<br/>o discrepa del clasificador?"}
+        N6["LLM mayor 14B<br/>o API externa, opcional"]
+    end
+    E3 --> N1 --> N3
+    E3 --> N2 --> N3
+    N3 --> N4 --> N5
+    N5 -- "no" --> R1
+    N5 -- "sí" --> N6 --> R1
+
+    R1["4. Reglas deterministas<br/>coherencia y Urgent"]
+    R1 --> DB2[("verdicts<br/>modelo, prompt, tiempo, tokens")]
+
+    subgraph IMPACTO["5. IMPACTO DE NEGOCIO"]
+        I1["Gasto en riesgo"]
+        I2["Días de inventario frente a duración"]
+        I3["Proveedor alternativo<br/>y productos afectados"]
+    end
+    DB2 --> I1
+    DB2 --> I2
+    DB2 --> I3
+    DB0[("suppliers, materials")] --> I1
+    DB0 --> I2
+    DB0 --> I3
+
+    subgraph SALIDA["6. SALIDA"]
+        S1["Excel: 4 columnas obligatorias"]
+        S2["Panel Streamlit<br/>alertas rojo, ámbar, verde"]
+        S3["API FastAPI<br/>para otros sistemas"]
+        S4["Aviso por email o Teams<br/>solo urgentes"]
+    end
+    DB2 --> S1
+    I1 --> S2
+    I2 --> S2
+    I3 --> S2
+    S2 --> S3
+    S2 --> S4
+
+    S2 --> FB["7. Corrección del analista"]
+    FB --> DB3[("feedback")]
+    DB3 -. "mejora prompt, ejemplos y reglas<br/>futuro: afinado LoRA" .-> N3
+    DB3 -. "amplía el conjunto de evaluación" .-> EV["Evaluación continua"]
