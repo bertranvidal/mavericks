@@ -3,3 +3,7 @@ pydantic
 requests
 pandas
 anthropic
+supabase
+python-dotenv
+openpyxl
+psycopg2-binary

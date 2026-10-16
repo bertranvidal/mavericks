@@ -16,10 +16,10 @@ def model_name() -> str:
     return os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_K_M")
 
 
-def _chat(prompt: str, system: str, schema: dict | None, model: str | None = None, timeout: int = 300) -> str:
+def _chat(prompt: str, system: str, schema: dict | None) -> str:
     url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
     body = {
-        "model": model or model_name(),
+        "model": model_name(),
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
@@ -30,7 +30,7 @@ def _chat(prompt: str, system: str, schema: dict | None, model: str | None = Non
     }
     if schema:
         body["format"] = schema
-    r = requests.post(url + "/api/chat", json=body, timeout=timeout)
+    r = requests.post(url + "/api/chat", json=body, timeout=300)
     r.raise_for_status()
     return r.json()["message"]["content"]
 
@@ -47,14 +47,14 @@ def _extract_json(text: str) -> dict:
     return json.loads(m.group(0))
 
 
-def ask_structured(prompt: str, system: str, model_cls, retries: int = 2, model: str | None = None, timeout: int = 300):
+def ask_structured(prompt: str, system: str, model_cls, retries: int = 2):
     """Pregunta al LLM y devuelve una instancia validada de model_cls (reintenta si falla)."""
     schema = model_cls.model_json_schema()
     last = None
     p = prompt
     for _ in range(retries + 1):
         try:
-            raw = _chat(p, system, schema, model, timeout)
+            raw = _chat(p, system, schema)
             return model_cls.model_validate(_extract_json(raw))
         except Exception as e:  # noqa: BLE001
             last = e

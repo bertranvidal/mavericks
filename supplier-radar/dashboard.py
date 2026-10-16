@@ -26,9 +26,6 @@ with st.sidebar:
     src = st.radio("Fuente", ["Live Day feed", "Test", "Validación (con respuestas)", "Subir Excel"])
     up = st.file_uploader("Excel de noticias", type=["xlsx"]) if src == "Subir Excel" else None
     mode = st.selectbox("Motor", ["models", "rules"], help="models = nuestros modelos afinados; rules = línea base sin modelos")
-    gen = st.checkbox("Redactar alertas con IA generativa", value=True,
-                      help="Los modelos deciden; la IA generativa solo redacta la alerta con esos resultados. Si no hay LLM local, usa plantilla.")
-    lang = st.radio("Idioma de la alerta", ["en", "es"], horizontal=True)
     go = st.button("Analizar", type="primary", use_container_width=True)
 
 if go:
@@ -42,7 +39,7 @@ if go:
             news = load_news({"Live Day feed": LIVE, "Test": TEST, "Validación (con respuestas)": VALID}[src])
         pool = load_pool(include_valid=(src != "Validación (con respuestas)"))
         with st.spinner("Analizando noticias..."):
-            res = analyze_news(news, pool, mode, alerts=gen, alert_lang=lang)
+            res = analyze_news(news, pool, mode)
         st.session_state["res"], st.session_state["news"] = res, news
     except Exception as e:  # noqa: BLE001
         st.error(f"No se pudo analizar: {e}")
@@ -86,18 +83,7 @@ for r in view.itertuples():
     label = f"{r.Priority} · {r.News_ID} · {r.Headline}"
     with st.expander(label, expanded=(r.Priority == "CRITICAL")):
         text = news.loc[news.News_ID == r.News_ID, "Summary"].iloc[0]
-        if getattr(r, "Alert_Title", ""):
-            st.markdown(f"#### {r.Alert_Title}")
-            st.write(r.Alert_Summary)
-            st.markdown(f"**Por qué importa:** {r.Alert_Why}")
-            st.markdown("**Siguientes pasos:**\n" + r.Alert_Steps)
-            with st.popover("Borrador de email al proveedor"):
-                st.text(r.Alert_Email)
-            st.caption(f"Alerta redactada por: {r.Alert_Source}")
-            st.divider()
-            st.caption("Noticia original: " + text)
-        else:
-            st.write(text)
+        st.write(text)
         c1, c2 = st.columns(2)
         with c1:
             st.markdown(f"**Riesgo:** {'sí' if r.Is_Risk == 'Y' else 'no'} · **Urgente:** {'sí' if r.Urgent == 'Y' else 'no'} · **Tipo:** {r.Event_Type}")

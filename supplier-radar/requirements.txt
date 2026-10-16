@@ -6,4 +6,3 @@ scikit-learn
 streamlit
 torch
 transformers
-sentencepiece

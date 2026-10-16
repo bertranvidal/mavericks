@@ -74,22 +74,14 @@ def process(news: pd.DataFrame, pool: pd.DataFrame, mode: str = "llm", workers: 
     return out
 
 
-def analyze_news(news: pd.DataFrame, pool: pd.DataFrame, mode: str = "models", alerts: bool = False,
-                 alert_lang: str = "en", alert_llm: bool = True, **kw) -> pd.DataFrame:
-    """process() + capa de impacto de negocio (+ alertas redactadas con IA generativa si alerts=True)."""
+def analyze_news(news: pd.DataFrame, pool: pd.DataFrame, mode: str = "models", **kw) -> pd.DataFrame:
+    """process() + capa de impacto de negocio."""
     from .data import load_materials, load_suppliers
     from .impact import enrich
 
     res = process(news, pool, mode, **kw)
     out = enrich(res, news, load_suppliers(), load_materials())
     out.attrs["seconds"] = res.attrs["seconds"]
-    if alerts:
-        from .alerts import add_alerts
-
-        t0 = time.time()
-        out = add_alerts(out, news, load_suppliers(), lang=alert_lang, use_llm=alert_llm)
-        out.attrs["seconds"] = res.attrs["seconds"]
-        out.attrs["alert_seconds"] = time.time() - t0
     return out
 
 

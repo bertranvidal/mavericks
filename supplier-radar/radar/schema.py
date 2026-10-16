@@ -22,9 +22,6 @@ EVENT_TYPES = [
     "Not relevant",
 ]
 
-IMPACTS = ["none", "delay", "stoppage"]
-DURATIONS = ["short", "long", "unknown"]
-
 
 class Verdict(BaseModel):
     event_type: str = Field(description="one of the allowed event types")

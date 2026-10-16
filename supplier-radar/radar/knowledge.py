@@ -41,20 +41,3 @@ COUNTRY_ALIASES = {
     "USA": ["usa", "united states", "u s"],
     "Puerto Rico (USA)": ["puerto rico"],
 }
-
-
-def city_aliases() -> dict:
-    """Alias manuales + los generados por fetch_geo.py (data/geo_regions.json) a partir de GeoNames."""
-    import json
-
-    from .config import DATA
-
-    out = {c: list(a) for c, a in CITY_ALIASES.items()}
-    geo = DATA / "geo_regions.json"
-    if geo.exists():
-        for city, aliases in json.loads(geo.read_text(encoding="utf-8")).items():
-            cur = out.setdefault(city, [])
-            for a in aliases:
-                if a not in cur:
-                    cur.append(a)
-    return out

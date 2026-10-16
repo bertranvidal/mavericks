@@ -1,95 +1,54 @@
-"""Inferencia con NUESTROS modelos afinados (texto + vinculacion). Se cargan una sola vez.
-
-Ensemble: se cargan todos los directorios models/text_clf* y models/link* y se promedian sus probabilidades
-(cada uno entrenado con una semilla distinta). Los umbrales calibrados se leen de models/thresholds.json.
-"""
-import json
+"""Inferencia con NUESTROS modelos afinados (texto + vinculacion). Se cargan una sola vez."""
 import os
 from pathlib import Path
 
 from .config import MODELS
-from .schema import DURATIONS, IMPACTS
 
 _cache = {}
-DEFAULT_THR = {"risk": 0.5, "urgent": 0.5, "link": 0.5}
-
-
-def find_dirs(prefix: str, env: str) -> list[Path]:
-    if os.getenv(env):
-        return [Path(p) for p in os.getenv(env).split(os.pathsep) if p]
-    return sorted(d for d in MODELS.glob(prefix + "*") if d.is_dir() and (d / "config.json").exists())
-
-
-def load_thresholds() -> dict:
-    thr = dict(DEFAULT_THR)
-    f = MODELS / "thresholds.json"
-    if f.exists():
-        thr.update({k: float(v) for k, v in json.loads(f.read_text(encoding="utf-8")).items() if k in thr})
-    return thr
 
 
 class Models:
-    def __init__(self, text_dirs: list[Path], link_dirs: list[Path]):
+    def __init__(self, text_dir: Path, link_dir: Path):
         import torch
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
         from .nn import MultiHead
 
-        if not text_dirs or not link_dirs:
-            raise FileNotFoundError("Faltan modelos en models/. Entrena primero: python3 train_text.py y python3 train_link.py")
+        for d in (text_dir, link_dir):
+            if not (Path(d) / "meta.json").exists() and not (Path(d) / "config.json").exists():
+                raise FileNotFoundError(
+                    f"Falta el modelo en {d}. Entrena primero: python3 train_text.py y python3 train_link.py")
         self.torch = torch
         self.dev = "cuda" if torch.cuda.is_available() else "cpu"
-        self.texts = []
-        for d in text_dirs:
-            m, tok, events = MultiHead.load(d)
-            self.texts.append((m.to(self.dev), tok))
-            self.events = events
-        self.links = []
-        for d in link_dirs:
-            self.links.append((AutoModelForSequenceClassification.from_pretrained(d).eval().to(self.dev),
-                               AutoTokenizer.from_pretrained(d)))
-        self.thr = load_thresholds()
-        self.n_text, self.n_link = len(self.texts), len(self.links)
+        self.text, self.ttok, self.events = MultiHead.load(text_dir)
+        self.text.to(self.dev)
+        self.link = AutoModelForSequenceClassification.from_pretrained(link_dir).eval().to(self.dev)
+        self.ltok = AutoTokenizer.from_pretrained(link_dir)
 
     def predict_text(self, texts: list[str]) -> list[dict]:
-        """Promedia las probabilidades de todos los modelos de texto del ensemble."""
         torch = self.torch
-        acc = None
-        for model, tok in self.texts:
-            enc = tok(texts, truncation=True, max_length=192, padding=True, return_tensors="pt").to(self.dev)
-            with torch.no_grad():
-                r, u, e, i, d = (o.float().softmax(-1) for o in model(enc["input_ids"], enc["attention_mask"]))
-            cur = [r, u, e, i, d]
-            acc = cur if acc is None else [a + c for a, c in zip(acc, cur)]
-        r, u, e, i, d = (a / self.n_text for a in acc)
-        out = []
-        for k in range(len(texts)):
-            p_stop, p_short = float(i[k][2]), float(d[k][0])  # IMPACTS[2]=stoppage, DURATIONS[0]=short
-            p_direct = float(u[k][1])
-            # urgencia = cabeza directa y, aparte, "para la produccion y no es corto" (dos senales independientes)
-            p_urg = 0.5 * p_direct + 0.5 * p_stop * (1 - p_short)
-            out.append({"p_risk": float(r[k][1]), "p_urgent": p_urg, "p_urgent_head": p_direct,
-                        "event": self.events[int(e[k].argmax())],
-                        "impact": IMPACTS[int(i[k].argmax())], "duration": DURATIONS[int(d[k].argmax())]})
-        return out
+        enc = self.ttok(texts, truncation=True, max_length=192, padding=True, return_tensors="pt").to(self.dev)
+        with torch.no_grad():
+            r, u, e = self.text(enc["input_ids"], enc["attention_mask"])
+        pr, pu, pe = r.softmax(-1)[:, 1], u.softmax(-1)[:, 1], e.softmax(-1)
+        return [{"p_risk": float(pr[i]), "p_urgent": float(pu[i]), "event": self.events[int(pe[i].argmax())]}
+                for i in range(len(texts))]
 
     def score_links(self, text: str, bs: list[str], chunk: int = 64) -> list[float]:
         torch = self.torch
-        total = None
-        for model, tok in self.links:
-            out = []
-            for i in range(0, len(bs), chunk):
-                part = bs[i:i + chunk]
-                enc = tok([text] * len(part), part, truncation="only_first", max_length=256,
-                          padding=True, return_tensors="pt").to(self.dev)
-                with torch.no_grad():
-                    logits = model(**enc).logits.squeeze(-1)
-                out += torch.sigmoid(logits.float()).cpu().tolist()
-            total = out if total is None else [a + b for a, b in zip(total, out)]
-        return [t / self.n_link for t in total]
+        out = []
+        for i in range(0, len(bs), chunk):
+            part = bs[i:i + chunk]
+            enc = self.ltok([text] * len(part), part, truncation="only_first", max_length=256,
+                            padding=True, return_tensors="pt").to(self.dev)
+            with torch.no_grad():
+                logits = self.link(**enc).logits.squeeze(-1)
+            out += torch.sigmoid(logits).float().cpu().tolist()
+        return out
 
 
 def get_models() -> Models:
     if "m" not in _cache:
-        _cache["m"] = Models(find_dirs("text_clf", "RADAR_TEXT_MODEL"), find_dirs("link", "RADAR_LINK_MODEL"))
+        _cache["m"] = Models(Path(os.getenv("RADAR_TEXT_MODEL", MODELS / "text_clf")),
+                             Path(os.getenv("RADAR_LINK_MODEL", MODELS / "link")))
     return _cache["m"]
