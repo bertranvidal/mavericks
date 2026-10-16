@@ -1,0 +1,8 @@
+pandas
+openpyxl
+pydantic
+requests
+scikit-learn
+streamlit
+torch
+transformers
