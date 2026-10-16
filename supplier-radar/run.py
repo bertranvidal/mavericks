@@ -9,7 +9,7 @@ from pathlib import Path
 
 from radar.config import LIVE, OUT
 from radar.data import load_news
-from radar.pipeline import load_pool, process, save_excel
+from radar.pipeline import analyze_news, load_pool, save_excel
 
 
 def main():
@@ -23,7 +23,7 @@ def main():
 
     news = load_news(a.file)
     pool = load_pool(include_valid=True)  # train + validation como ejemplos; nunca test ni live
-    res = process(news, pool, a.mode, a.workers, use_cache=not a.no_cache)
+    res = analyze_news(news, pool, a.mode, workers=a.workers, use_cache=not a.no_cache)
 
     OUT.mkdir(exist_ok=True)
     out = Path(a.out) if a.out else OUT / (Path(a.file).stem + "_result.xlsx")

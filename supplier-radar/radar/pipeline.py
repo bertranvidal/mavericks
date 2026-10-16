@@ -4,6 +4,7 @@ import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pandas as pd
 from openpyxl.styles import Font, PatternFill
@@ -73,9 +74,20 @@ def process(news: pd.DataFrame, pool: pd.DataFrame, mode: str = "llm", workers: 
     return out
 
 
+def analyze_news(news: pd.DataFrame, pool: pd.DataFrame, mode: str = "models", **kw) -> pd.DataFrame:
+    """process() + capa de impacto de negocio."""
+    from .data import load_materials, load_suppliers
+    from .impact import enrich
+
+    res = process(news, pool, mode, **kw)
+    out = enrich(res, news, load_suppliers(), load_materials())
+    out.attrs["seconds"] = res.attrs["seconds"]
+    return out
+
+
 def save_excel(df: pd.DataFrame, path) -> None:
     """Hoja 'Results' con SOLO las 4 columnas pedidas y hoja 'Details' con todo."""
-    path = str(path)
+    path = str(path) if isinstance(path, (str, Path)) else path  # tambien vale un BytesIO
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         df[REQUIRED].to_excel(xw, sheet_name="Results", index=False)
         df.drop(columns=[]).to_excel(xw, sheet_name="Details", index=False)

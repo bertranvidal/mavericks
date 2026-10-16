@@ -21,7 +21,7 @@ def ids(x) -> set:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="val", choices=["train", "val"])
+    ap.add_argument("--data", default="val", choices=["train", "val", "holdout"])
     ap.add_argument("--mode", default="models", choices=["models", "rules", "llm"])
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--no-cache", action="store_true")
@@ -31,8 +31,8 @@ def main():
         print("AVISO: los modelos se entrenan con train; medir en train es en la muestra, no vale como acierto real.")
     news = load_news(DATASETS[a.data])
     assert is_labelled(news), "este fichero no tiene respuestas"
-    # val: ejemplos solo de train. train: ejemplos de train+val menos la propia noticia (se excluye en el retriever)
-    pool = load_pool(include_valid=(a.data == "train"))
+    # val: ejemplos solo de train. train/holdout: train+val (a cada noticia se le excluye ella misma en el retriever)
+    pool = load_pool(include_valid=(a.data != "val"))
     pred = process(news, pool, a.mode, a.workers, use_cache=not a.no_cache)
 
     df = news[["News_ID", "Headline", "Is_Risk", "Urgent", "Affected_Supplier_IDs"]].merge(
