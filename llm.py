@@ -21,8 +21,11 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.groq.com/openai/v1")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "llama-3.3-70b-versatile")
 
 
-def ask(prompt: str, system: str = "") -> str:
-    """Envía un prompt y devuelve el texto de la respuesta."""
+def ask(prompt: str, system: str = "", json_schema: dict | None = None) -> str:
+    """Envía un prompt y devuelve el texto de la respuesta.
+
+    Si pasas json_schema, Ollama obliga al modelo a respetar esa estructura.
+    """
     if PROVIDER == "anthropic":
         import anthropic  # pip install anthropic
 
@@ -39,44 +42,61 @@ def ask(prompt: str, system: str = "") -> str:
         # Sirve para Groq, OpenRouter, Gemini (endpoint compatible), etc.
         # Ej. Groq:   OPENAI_BASE_URL=https://api.groq.com/openai/v1
         # Ej. Gemini: OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+        body = {
+            "model": OPENAI_MODEL,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        if json_schema:
+            body["response_format"] = {"type": "json_object"}
         r = requests.post(
             f"{OPENAI_BASE_URL}/chat/completions",
             headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
-            json={
-                "model": OPENAI_MODEL,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": prompt},
-                ],
-            },
+            json=body,
             timeout=120,
         )
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
 
-    r = requests.post(
-        f"{OLLAMA_HOST}/api/chat",
-        json={
-            "model": OLLAMA_MODEL,
-            "stream": False,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt},
-            ],
-        },
-        timeout=300,
-    )
+    body = {
+        "model": OLLAMA_MODEL,
+        "stream": False,
+        "options": {"temperature": 0.2},
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+    }
+    if json_schema:
+        body["format"] = json_schema  # Ollama fuerza la salida a ese esquema
+    r = requests.post(f"{OLLAMA_HOST}/api/chat", json=body, timeout=300)
     r.raise_for_status()
     return r.json()["message"]["content"]
 
 
+def _template(schema: type[BaseModel]) -> str:
+    """Ejemplo de la forma del JSON (los modelos pequeños se confunden si les das el esquema técnico)."""
+    example = {}
+    for name, prop in schema.model_json_schema().get("properties", {}).items():
+        t = prop.get("type")
+        example[name] = (
+            ["..."] if t == "array" else 0 if t in ("integer", "number") else False if t == "boolean" else "..."
+        )
+    return json.dumps(example, ensure_ascii=False)
+
+
 def ask_structured(prompt: str, schema: type[BaseModel], system: str = "", retries: int = 2):
     """Pide JSON, lo valida con Pydantic y reintenta si no cuadra."""
-    spec = json.dumps(schema.model_json_schema(), ensure_ascii=False)
-    full = f"{prompt}\n\nResponde SOLO con un JSON válido que cumpla este esquema:\n{spec}"
+    full = (
+        f"Texto a analizar:\n{prompt}\n\n"
+        f"Devuelve SOLO un objeto JSON con exactamente estas claves: {_template(schema)}\n"
+        "Sustituye los '...' por contenido real basado en el texto. No repitas ni describas el esquema."
+    )
     last_err = None
     for _ in range(retries + 1):
-        raw = ask(full, system)
+        raw = ask(full, system, json_schema=schema.model_json_schema())
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         try:
             return schema.model_validate_json(match.group(0) if match else raw)
