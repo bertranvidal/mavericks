@@ -8,6 +8,9 @@ import os
 from pathlib import Path
 
 from .config import MODELS
+from .data import load_suppliers
+from .matcher import Matcher
+from .pairs import hint_prefix
 from .schema import DURATIONS, IMPACTS
 
 _cache = {}
@@ -48,6 +51,7 @@ class Models:
         for d in link_dirs:
             self.links.append((AutoModelForSequenceClassification.from_pretrained(d).eval().to(self.dev),
                                AutoTokenizer.from_pretrained(d)))
+        self.matcher = Matcher(load_suppliers())
         self.thr = load_thresholds()
         self.n_text, self.n_link = len(self.texts), len(self.links)
 
@@ -55,6 +59,7 @@ class Models:
         """Promedia las probabilidades de todos los modelos de texto del ensemble."""
         torch = self.torch
         acc = None
+        texts = [hint_prefix(self.matcher.hints(t)) + " " + t for t in texts]  # igual que en el entrenamiento
         for model, tok in self.texts:
             enc = tok(texts, truncation=True, max_length=192, padding=True, return_tensors="pt").to(self.dev)
             with torch.no_grad():

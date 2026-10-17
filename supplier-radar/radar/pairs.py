@@ -40,3 +40,10 @@ def build_pairs(news: pd.DataFrame, suppliers: pd.DataFrame, matcher: Matcher, n
         for sid in chosen:
             out.append((r.text, pair_b(sup[sid], hmap.get(sid, [])), int(sid in gold)))
     return out
+
+
+def hint_prefix(hints: list[dict]) -> str:
+    """Pista generica (sin IDs) para el modelo de texto: que tipo de coincidencia con proveedores hay en la noticia.
+    Asi no tiene que memorizar que ciudades tienen proveedores."""
+    cats = sorted({r for h in hints for r in h["reasons"]})
+    return "[supplier hints: " + (", ".join(cats) if cats else "none") + "]"

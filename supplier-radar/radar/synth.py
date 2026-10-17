@@ -80,9 +80,11 @@ class Gen:
         k = self.r.randint(2, 8)
         if kind == "long":
             return self.pick([f"for at least {k} weeks", f"for up to {k} weeks", f"for about {k} weeks",
-                              f"for the next {k} weeks", "for about two months", f"for {k} weeks"])
+                              f"for the next {k} weeks", "for about two months", f"for {k} weeks", "for over a month",
+                              "well into next month"])
         if kind == "short":
-            return self.pick(["for 48 hours", "for two days", "for a day", "for 24 hours", "over the weekend"])
+            return self.pick(["for 48 hours", "for two days", "for a day", "for 24 hours", "over the weekend",
+                              "for the next 48 hours", "for one day", "until Friday", "on Tuesday and Wednesday", "for three days"])
         return self.pick(["with no restart date announced", "until further notice", "and no timeline has been given"])
 
     def style(self, h, s):
@@ -232,9 +234,40 @@ class Gen:
         c = self.pick(list(self.by_city))
         return c, self.by_city[c]
 
+
+    HAZ_PHRASE = ["a typhoon", "severe flooding", "an earthquake", "wildfires", "a violent storm", "an extreme heatwave",
+                  "a hurricane", "heavy snowfall", "torrential rain", "a cyclone"]
+
+    def closure_text(self, place, kind):
+        """Titular y resumen de un cierre industrial por desastre, con muchas redacciones distintas."""
+        hz = self.pick(self.HAZ_PHRASE)
+        if kind == "short":
+            d = self.dur("short")
+            return self.pick([
+                (f"Factories in {place} shut as {hz} hits", f"Manufacturers in {place} suspended operations {d} while {hz} passes. Normal activity should return afterwards."),
+                (f"Authorities order {place} plants to halt work", f"Local officials told industrial sites in {place} to stop operations {d} because of {hz}."),
+                (f"{hz.capitalize()} closes businesses in {place}", f"Shops, schools and factories in {place} were closed {d} after {hz}."),
+                (f"Work stops at {place} industrial zone", f"Operators in {place} halted production {d} as a precaution ahead of {hz}; restart is expected right after."),
+                (f"{place} factories close temporarily after {hz}", f"Plants in {place} will stay shut {d}. The authorities expect a quick return to normal."),
+            ]), "short"
+        if kind == "long":
+            d = self.dur("long")
+            return self.pick([
+                (f"{hz.capitalize()} leaves {place} factories shut", f"Factories in {place} will remain closed {d} after {hz} damaged power lines and roads."),
+                (f"Industrial output in {place} halted after {hz}", f"Production across {place} industrial parks is halted {d} while repairs continue."),
+                (f"Evacuation order empties {place} industrial estates", f"Authorities evacuated industrial estates in {place} after {hz}; they will stay closed {d}."),
+            ]), "long"
+        return self.pick([
+            (f"Plants in {place} idle after {hz}", f"Industrial plants in {place} stopped work after {hz} and officials have not said when they will reopen."),
+            (f"{place} manufacturers suspend output", f"Manufacturers in {place} suspended output following {hz}. No restart date has been announced."),
+        ]), "unknown"
+
     def location_disaster(self):
         place, ids = self.place()
         ev, noun = self.pick(self.HAZ)
+        if self.r.random() < 0.55:  # redacciones variadas
+            (h, s), kind = self.closure_text(place, self.pick(["long", "long", "unknown", "short", "short"]))
+            return self.out(h, s, True, ids, "Natural disaster", "stoppage", kind)
         v = self.pick(["long", "long", "unknown", "short", "checks"])
         if v == "long":
             d = self.dur("long")
@@ -262,6 +295,9 @@ class Gen:
         """Evento grave pero en un lugar SIN proveedores: no es riesgo para Helixa."""
         p = self.pick(OTHER_PLACES)
         ev, noun = self.pick(self.HAZ)
+        if self.r.random() < 0.55:  # mismas redacciones que arriba, pero en un lugar sin proveedores
+            (h, s), _ = self.closure_text(p, self.pick(["long", "long", "unknown", "short", "short"]))
+            return self.out(h, s, False, [], "Not relevant")
         h, s = self.pick([
             (f"{noun} hits {p}, industrial plants closed", f"{noun} struck {p}. Many factories have stopped production and roads are closed for weeks."),
             (f"Fire at chemical plant in {p} forces evacuation", f"A fire at a chemical plant in {p} led to an evacuation. The plant will stay closed for several weeks."),

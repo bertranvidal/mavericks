@@ -7,6 +7,7 @@ Sirve para diagnosticar fallos (por que dice X), no para medir acierto.
 import argparse
 
 from radar.models import get_models
+from radar.pairs import hint_prefix
 
 BUILTIN = [
     # cierres CORTOS por mal tiempo en la ciudad de un proveedor (esperado: riesgo, no urgente)
@@ -33,8 +34,9 @@ def main():
     torch = m.torch
     ens = m.predict_text(texts)
     per = []
+    pt = [hint_prefix(m.matcher.hints(t)) + " " + t for t in texts]
     for model, tok in m.texts:
-        enc = tok(texts, truncation=True, max_length=192, padding=True, return_tensors="pt").to(m.dev)
+        enc = tok(pt, truncation=True, max_length=192, padding=True, return_tensors="pt").to(m.dev)
         with torch.no_grad():
             r = model(enc["input_ids"], enc["attention_mask"])[0].float().softmax(-1)[:, 1]
         per.append(r.cpu().tolist())

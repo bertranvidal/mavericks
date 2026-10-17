@@ -17,7 +17,9 @@ import torch.nn.functional as F
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 
 from radar.config import DATA, HOLDOUT, MODELS, TRAIN, VALID
-from radar.data import load_extra, load_news
+from radar.data import load_extra, load_news, load_suppliers
+from radar.matcher import Matcher
+from radar.pairs import hint_prefix
 from radar.nn import MultiHead
 from radar.schema import DURATIONS, EVENT_TYPES, IMPACTS
 from radar.synth import load_synth
@@ -120,7 +122,12 @@ def main():
 
     tok = AutoTokenizer.from_pretrained(a.base)
     model = MultiHead.new(a.base, len(events)).to(dev)
-    texts = train["text"].tolist()
+    matcher = Matcher(load_suppliers())
+
+    def with_hints(ts):  # el modelo ve tambien si la noticia menciona ciudad/nombre/region de proveedores (sin IDs)
+        return [hint_prefix(matcher.hints(t)) + " " + t for t in ts]
+
+    texts = with_hints(train["text"].tolist())
     labels = list(encode_labels(train, events))
     steps = a.epochs * ((len(texts) + a.bs - 1) // a.bs)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=0.01)
@@ -149,7 +156,7 @@ def main():
         print(f"epoca {ep + 1}/{a.epochs}  loss {tot / n:.4f}", flush=True)
 
     if not a.with_val:
-        pr, pu, pe, _, _ = predict(model, tok, val["text"].tolist(), dev)
+        pr, pu, pe, _, _ = predict(model, tok, with_hints(val["text"].tolist()), dev)
         yr, yu, ye, _, _ = encode_labels(val, events)
         print(f"\n== VALIDACION REAL ({len(val)} noticias) ==")
         m = yr == 1  # la cabeza de urgencia solo se entrena (y solo importa) en noticias de riesgo
