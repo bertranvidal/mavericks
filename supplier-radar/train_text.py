@@ -16,7 +16,7 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 
-from radar.config import DATA, MODELS, TRAIN, VALID
+from radar.config import DATA, HOLDOUT, MODELS, TRAIN, VALID
 from radar.data import load_extra, load_news
 from radar.nn import MultiHead
 from radar.schema import DURATIONS, EVENT_TYPES, IMPACTS
@@ -87,6 +87,7 @@ def main():
     ap.add_argument("--real-weight", type=int, default=6, help="cuantas veces se repite cada noticia real")
     ap.add_argument("--smooth", type=float, default=0.03, help="label smoothing")
     ap.add_argument("--with-val", action="store_true")
+    ap.add_argument("--with-holdout", action="store_true", help="version final: incluye tambien el examen independiente (ya no se puede medir en el)")
     ap.add_argument("--no-aug", action="store_true")
     ap.add_argument("--out", default=str(MODELS / "text_clf"))
     ap.add_argument("--seed", type=int, default=7)
@@ -100,6 +101,8 @@ def main():
     val = load_news(VALID)
     if a.with_val:
         real = pd.concat([real, val], ignore_index=True)
+    if a.with_holdout:
+        real = pd.concat([real, load_news(HOLDOUT)], ignore_index=True)
     synth = load_synth()
     parts = [synth] + [real] * a.real_weight
     msg = f"{len(synth)} sinteticas + {len(real)} reales x{a.real_weight}"
