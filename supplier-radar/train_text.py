@@ -161,7 +161,7 @@ def main():
         print(f"\n== VALIDACION REAL ({len(val)} noticias) ==")
         m = yr == 1  # la cabeza de urgencia solo se entrena (y solo importa) en noticias de riesgo
         print(f"Is_Risk {np.mean(pr == yr):.0%}   Urgent (solo noticias de riesgo, {int(m.sum())}) {np.mean(pu[m] == yu[m]):.0%}   Evento {np.mean(pe == ye):.0%}")
-    model.save(a.out, tok, events, a.base)
+    model.save(a.out, tok, events, a.base, hints=True)
     print("guardado en", a.out)
 
 

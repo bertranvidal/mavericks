@@ -32,13 +32,13 @@ class MultiHead(nn.Module):
         pooled = self.drop((out * m).sum(1) / m.sum(1).clamp(min=1))
         return self.risk(pooled), self.urg(pooled), self.ev(pooled), self.imp(pooled), self.dur(pooled)
 
-    def save(self, d, tokenizer, events: list[str], base: str):
+    def save(self, d, tokenizer, events: list[str], base: str, hints: bool = False):
         d = Path(d)
         d.mkdir(parents=True, exist_ok=True)
         self.enc.config.save_pretrained(d)
         tokenizer.save_pretrained(d)
         torch.save({k: v.cpu() for k, v in self.state_dict().items()}, d / "weights.pt")
-        (d / "meta.json").write_text(json.dumps({"events": events, "base": base, "version": 2}), encoding="utf-8")
+        (d / "meta.json").write_text(json.dumps({"events": events, "base": base, "version": 3 if hints else 2, "hints": hints}), encoding="utf-8")
 
     @classmethod
     def load(cls, d):
@@ -47,4 +47,5 @@ class MultiHead(nn.Module):
         enc = AutoModel.from_config(AutoConfig.from_pretrained(d))
         m = cls(enc, len(meta["events"]))
         m.load_state_dict(torch.load(d / "weights.pt", map_location="cpu"))
+        m.meta = meta  # meta["hints"]: el modelo se entreno con la pista de proveedores como prefijo
         return m.eval(), AutoTokenizer.from_pretrained(d), meta["events"]

@@ -45,7 +45,7 @@ class Models:
         self.texts = []
         for d in text_dirs:
             m, tok, events = MultiHead.load(d)
-            self.texts.append((m.to(self.dev), tok))
+            self.texts.append((m.to(self.dev), tok, bool(getattr(m, "meta", {}).get("hints", False))))
             self.events = events
         self.links = []
         for d in link_dirs:
@@ -59,9 +59,11 @@ class Models:
         """Promedia las probabilidades de todos los modelos de texto del ensemble."""
         torch = self.torch
         acc = None
-        texts = [hint_prefix(self.matcher.hints(t)) + " " + t for t in texts]  # igual que en el entrenamiento
-        for model, tok in self.texts:
-            enc = tok(texts, truncation=True, max_length=192, padding=True, return_tensors="pt").to(self.dev)
+        hinted = None
+        for model, tok, use_hints in self.texts:
+            if use_hints and hinted is None:  # igual que en el entrenamiento (solo los modelos entrenados con pista)
+                hinted = [hint_prefix(self.matcher.hints(t)) + " " + t for t in texts]
+            enc = tok(hinted if use_hints else texts, truncation=True, max_length=192, padding=True, return_tensors="pt").to(self.dev)
             with torch.no_grad():
                 r, u, e, i, d = (o.float().softmax(-1) for o in model(enc["input_ids"], enc["attention_mask"]))
             cur = [r, u, e, i, d]

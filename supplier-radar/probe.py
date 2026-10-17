@@ -35,8 +35,8 @@ def main():
     ens = m.predict_text(texts)
     per = []
     pt = [hint_prefix(m.matcher.hints(t)) + " " + t for t in texts]
-    for model, tok in m.texts:
-        enc = tok(pt, truncation=True, max_length=192, padding=True, return_tensors="pt").to(m.dev)
+    for model, tok, use_hints in m.texts:
+        enc = tok(pt if use_hints else texts, truncation=True, max_length=192, padding=True, return_tensors="pt").to(m.dev)
         with torch.no_grad():
             r = model(enc["input_ids"], enc["attention_mask"])[0].float().softmax(-1)[:, 1]
         per.append(r.cpu().tolist())
