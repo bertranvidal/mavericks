@@ -58,11 +58,7 @@ def build(cities_txt: str, admin_txt: str, country_txt: str, suppliers: pd.DataF
         names = set()
         for n in admin.get(f"{cc}.{r[4]}", ()):
             names.add(norm(n))
-        for a in r[2].split(","):
-            a = norm(a)
-            if a and a.isascii() and len(a) >= 4 and not a.isdigit():
-                names.add(a)
-        names.discard(key)
+        names.discard(key)  # solo el nombre de la region (provincia/estado); NO los nombres alternativos de la ciudad
         out[s.City] = sorted(n for n in names if len(n) >= 4)[:15]
     return out
 

@@ -13,8 +13,8 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
 
-from radar.config import MODELS, TRAIN, VALID
-from radar.data import load_news, load_suppliers
+from radar.config import HOLDOUT, MODELS, TRAIN, VALID
+from radar.data import load_extra, load_news, load_suppliers
 from radar.matcher import Matcher
 from radar.pairs import build_pairs, ids_of
 from radar.synth import load_synth
@@ -49,6 +49,7 @@ def main():
     ap.add_argument("--neg", type=int, default=8, help="negativos aleatorios por noticia sintetica")
     ap.add_argument("--real-weight", type=int, default=4)
     ap.add_argument("--with-val", action="store_true")
+    ap.add_argument("--with-holdout", action="store_true", help="version final: incluye tambien el examen independiente")
     ap.add_argument("--out", default=str(MODELS / "link"))
     ap.add_argument("--seed", type=int, default=7)
     a = ap.parse_args()
@@ -62,7 +63,12 @@ def main():
     val = load_news(VALID)
     if a.with_val:
         real = pd.concat([real, val], ignore_index=True)
+    if a.with_holdout:
+        real = pd.concat([real, load_news(HOLDOUT)], ignore_index=True)
     pairs = build_pairs(load_synth(), sup, matcher, n_neg=a.neg, seed=a.seed)
+    for name, df in load_extra():  # parafrasis, reescrituras con LLM, ruido real (si se han generado)
+        pairs += build_pairs(df, sup, matcher, n_neg=a.neg, seed=a.seed)
+        print(f"  + {len(df)} noticias de {name}", flush=True)
     pairs += build_pairs(real, sup, matcher, n_neg=None) * a.real_weight  # reales: todos los pares
     random.shuffle(pairs)
     pos = sum(p[2] for p in pairs)
