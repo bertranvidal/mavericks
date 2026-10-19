@@ -9,7 +9,7 @@ export default function Suppliers() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  const atRiskIds = new Set(alerts.flatMap(a => a.Affected_Suppliers ?? []))
+  const atRiskIds = new Set(alerts.flatMap(a => (a.Affected_Supplier_IDs ?? '').split(';').map(x => x.trim()).filter(Boolean)))
   const isAtRisk = (s: Supplier) => atRiskIds.has(s.Supplier_ID) || atRiskIds.has(s.Supplier_Name)
 
   const fmt = (n: number) => n != null ? `€${n.toLocaleString()}` : '—'

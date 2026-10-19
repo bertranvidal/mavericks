@@ -12,7 +12,7 @@ const navItems = [
 ]
 
 export default function Sidebar() {
-  const { source, setSource, mode, setMode, analyse, analyzing, lastSeconds } = useApp()
+  const { source, setSource, mode, setMode, analyse, analyzing } = useApp()
 
   return (
     <aside
@@ -113,10 +113,6 @@ export default function Sidebar() {
           {analyzing ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
           {analyzing ? 'Analysing...' : 'Analyse'}
         </button>
-
-        {lastSeconds !== null && (
-          <p className="text-center text-xs mb-2" style={{ color: '#666' }}>Last run: {lastSeconds.toFixed(1)}s</p>
-        )}
 
         <button
           onClick={exportExcel}

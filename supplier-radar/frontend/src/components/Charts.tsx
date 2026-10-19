@@ -10,6 +10,11 @@ import {
 } from 'recharts'
 import type { AlertResult, Supplier } from '../api'
 
+function parseIds(s: string | undefined): string[] {
+  if (!s) return []
+  return s.split(';').map(x => x.trim()).filter(Boolean)
+}
+
 const PRIORITY_COLORS: Record<string, string> = {
   CRITICAL: '#ff4d4d',
   HIGH: '#ff8800',
@@ -58,7 +63,7 @@ export function AlertsByPriorityChart({ alerts }: { alerts: AlertResult[] }) {
 }
 
 export function SuppliersByCountryChart({ alerts, suppliers }: { alerts: AlertResult[]; suppliers: Supplier[] }) {
-  const atRiskIds = new Set(alerts.flatMap(a => a.Affected_Suppliers ?? []))
+  const atRiskIds = new Set(alerts.flatMap(a => parseIds(a.Affected_Supplier_IDs)))
   const countryCount: Record<string, number> = {}
   suppliers
     .filter(s => atRiskIds.has(s.Supplier_ID) || atRiskIds.has(s.Supplier_Name))
@@ -91,7 +96,7 @@ export function SuppliersByCountryChart({ alerts, suppliers }: { alerts: AlertRe
 export function TopSuppliersChart({ alerts, suppliers }: { alerts: AlertResult[]; suppliers: Supplier[] }) {
   const alertCount: Record<string, number> = {}
   alerts.forEach(a => {
-    (a.Affected_Suppliers ?? []).forEach(sid => {
+    (parseIds(a.Affected_Supplier_IDs)).forEach(sid => {
       alertCount[sid] = (alertCount[sid] ?? 0) + 1
     })
   })

@@ -25,7 +25,7 @@ export default function Alerts() {
     const matchSearch = !search ||
       a.Headline?.toLowerCase().includes(search.toLowerCase()) ||
       a.Event_Type?.toLowerCase().includes(search.toLowerCase()) ||
-      a.Summary?.toLowerCase().includes(search.toLowerCase())
+      a.Reasoning?.toLowerCase().includes(search.toLowerCase())
     return matchPriority && matchSearch
   })
 
