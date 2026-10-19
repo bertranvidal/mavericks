@@ -2,6 +2,8 @@ pandas
 openpyxl
 pydantic
 requests
+fastapi
+uvicorn[standard]
 scikit-learn
 streamlit
 torch

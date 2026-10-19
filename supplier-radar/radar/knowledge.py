@@ -41,3 +41,7 @@ COUNTRY_ALIASES = {
     "USA": ["usa", "united states", "u s"],
     "Puerto Rico (USA)": ["puerto rico"],
 }
+
+
+def city_aliases() -> dict[str, list[str]]:
+    return CITY_ALIASES

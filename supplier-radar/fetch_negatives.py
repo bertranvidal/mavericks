@@ -1,3 +1,4 @@
+
 """Ruido REAL para entrenar: noticias de negocio genericas (ag_news, categoria Business) como 'no relevante'.
 
 Ensenan al modelo a no saltar con cualquier noticia economica. Se descartan las que contienen palabras de incidente
