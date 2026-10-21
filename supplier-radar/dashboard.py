@@ -1,374 +1,823 @@
-"""Supplier Risk Radar — Dashboard profesional.
+"""Panel de alertas del Supplier Risk Radar.
 
-  streamlit run dashboard.py
+  python3 -m streamlit run dashboard.py --server.port 8501 --server.headless true \
+      --server.enableCORS false --server.enableXsrfProtection false
 """
 import io
 
 import pandas as pd
+import pydeck as pdk
 import streamlit as st
 
 from radar.config import LIVE, TEST, VALID
-from radar.data import is_labelled, load_news, load_suppliers, load_materials
+from radar.data import is_labelled, load_materials, load_news, load_suppliers
+from radar.alerts import add_alerts
 from radar.impact import eur, ids_of
 from radar.pipeline import analyze_news, load_pool, save_excel
 
-# ── Page config ──────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Supplier Risk Radar", page_icon="🛡️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Supplier Risk Radar", layout="wide")
 
-# ── Custom CSS (dark corporate / Accenture purple) ───────────────────────────
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-/* Global */
-.stApp { font-family: 'Inter', sans-serif; }
-
-/* Header bar */
-.header-bar {
-    background: linear-gradient(135deg, #7B2FBE 0%, #A100FF 50%, #460073 100%);
-    padding: 1.5rem 2rem;
-    border-radius: 12px;
-    margin-bottom: 1.5rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-.header-bar h1 { color: white; margin: 0; font-size: 1.8rem; font-weight: 700; }
-.header-bar p { color: rgba(255,255,255,0.85); margin: 0.25rem 0 0 0; font-size: 0.9rem; }
-.header-logo { font-size: 2.5rem; }
-
-/* KPI cards */
-.kpi-card {
-    background: linear-gradient(145deg, #1a1a2e, #16213e);
-    border: 1px solid rgba(123,47,190,0.3);
-    border-radius: 12px;
-    padding: 1.2rem;
-    text-align: center;
-    transition: transform 0.2s, box-shadow 0.2s;
-}
-.kpi-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(123,47,190,0.2); }
-.kpi-value { font-size: 2rem; font-weight: 700; color: #A100FF; }
-.kpi-label { font-size: 0.8rem; color: #999; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 0.3rem; }
-.kpi-card.critical .kpi-value { color: #ff4d4d; }
-.kpi-card.warn .kpi-value { color: #ffaa00; }
-.kpi-card.ok .kpi-value { color: #00d4aa; }
-
-/* Priority badges */
-.badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
-.badge-critical { background: #ff4d4d22; color: #ff4d4d; border: 1px solid #ff4d4d44; }
-.badge-high { background: #ff880022; color: #ff8800; border: 1px solid #ff880044; }
-.badge-medium { background: #ffcc0022; color: #ffcc00; border: 1px solid #ffcc0044; }
-.badge-low { background: #00d4aa22; color: #00d4aa; border: 1px solid #00d4aa44; }
-
-/* Alert cards */
-.alert-card {
-    border-radius: 10px;
-    padding: 1.2rem;
-    margin-bottom: 0.8rem;
-    border-left: 4px solid;
-    background: rgba(26,26,46,0.6);
-}
-.alert-critical { border-left-color: #ff4d4d; background: rgba(255,77,77,0.05); }
-.alert-high { border-left-color: #ff8800; background: rgba(255,136,0,0.05); }
-.alert-medium { border-left-color: #ffcc00; background: rgba(255,204,0,0.05); }
-.alert-low { border-left-color: #00d4aa; background: rgba(0,212,170,0.03); }
-
-/* Sidebar styling */
-section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0f0f23, #1a1a2e);
-    border-right: 1px solid rgba(123,47,190,0.2);
-}
-section[data-testid="stSidebar"] .stRadio label { color: #ccc; }
-
-/* Accuracy banner */
-.accuracy-bar {
-    background: linear-gradient(90deg, rgba(0,212,170,0.1), rgba(123,47,190,0.1));
-    border: 1px solid rgba(0,212,170,0.3);
-    border-radius: 10px;
-    padding: 0.8rem 1.2rem;
-    margin-bottom: 1rem;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-.accuracy-val { font-size: 1.3rem; font-weight: 700; color: #00d4aa; }
-
-/* Tabs override */
-.stTabs [data-baseweb="tab-list"] { gap: 0.5rem; }
-.stTabs [data-baseweb="tab"] {
-    border-radius: 8px 8px 0 0;
-    padding: 0.5rem 1.5rem;
-}
-
-/* Supplier tag */
-.sup-tag {
-    display: inline-block;
-    background: rgba(123,47,190,0.15);
-    border: 1px solid rgba(123,47,190,0.3);
-    border-radius: 6px;
-    padding: 0.2rem 0.5rem;
-    margin: 0.15rem;
-    font-size: 0.8rem;
-    color: #c89dff;
-}
-
-/* Action box */
-.action-box {
-    background: rgba(161,0,255,0.08);
-    border: 1px solid rgba(161,0,255,0.25);
-    border-radius: 8px;
-    padding: 0.8rem 1rem;
-    margin-top: 0.5rem;
-    font-size: 0.85rem;
-    color: #ddd;
-}
-
-/* Info row */
-.info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin: 0.5rem 0; }
-.info-item { font-size: 0.85rem; color: #bbb; }
-.info-item strong { color: #eee; }
-</style>
-""", unsafe_allow_html=True)
-
-# ── Data ─────────────────────────────────────────────────────────────────────
-SUP = load_suppliers().set_index("Supplier_ID")
-MAT = load_materials()
-PRIORITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
-
-# ── Header ───────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="header-bar">
-    <div>
-        <h1>🛡️ Supplier Risk Radar</h1>
-        <p>AI-powered news monitoring for Helixa Pharmaceuticals' 40 critical suppliers</p>
-    </div>
-    <div class="header-logo">⚡</div>
-</div>
-""", unsafe_allow_html=True)
-
-# ── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### ⚙️ Control Panel")
-    st.divider()
-    src = st.radio("📰 News Source", ["Live Day feed", "Test", "Validation (labelled)", "Upload Excel"],
-                   help="Select the news feed to analyse")
-    up = st.file_uploader("Upload news Excel", type=["xlsx"]) if src == "Upload Excel" else None
-    st.divider()
-    mode = st.selectbox("🤖 Engine", ["rules", "models"],
-                        help="rules = keyword baseline (fast, no GPU); models = fine-tuned classifiers")
-    st.divider()
-    go = st.button("🚀 Analyse", type="primary", use_container_width=True)
-    st.divider()
-    st.markdown("##### 📊 Supplier Portfolio")
-    st.metric("Total Suppliers", len(SUP))
-    st.metric("Total Annual Spend", eur(SUP["Annual_Spend_EUR"].sum()))
-    st.metric("Single-Source Suppliers", int((SUP["Single_Source"] == "Y").sum()))
+    lang = st.radio(
+        "Language" if st.session_state.get("dashboard_language", "en") == "en" else "Idioma",
+        ["en", "es"],
+        format_func={"en": "English", "es": "Español"}.get,
+        horizontal=True,
+        key="dashboard_language",
+    )
 
-# ── Run analysis ─────────────────────────────────────────────────────────────
+TEXT = {
+    "en": {
+        "title_caption": "News risk monitor for Helixa Pharmaceuticals' 40 suppliers",
+        "input": "Input",
+        "source": "Source",
+        "live": "Live Day feed",
+        "test": "Test",
+        "validation": "Validation (labelled)",
+        "upload": "Upload Excel",
+        "news_excel": "News Excel file",
+        "engine": "Engine",
+        "engine_help": "models = our fine-tuned models; rules = baseline without models",
+        "models": "Fine-tuned models",
+        "rules": "Rules (baseline)",
+        "gen_alerts": "Draft alerts with generative AI",
+        "gen_help": "The models decide; generative AI only writes the alert. If no local LLM is available, a template is used.",
+        "analyze": "Analyze",
+        "upload_first": "Upload an Excel file first.",
+        "analyzing": "Analyzing news...",
+        "updating_alerts": "Updating alert language...",
+        "analysis_error": "Could not analyze: ",
+        "choose_source": "Choose a source and click **Analyze**.",
+        "news": "News",
+        "risks": "Risks",
+        "urgent": "Urgent",
+        "annual_spend": "Annual spend associated",
+        "time": "Time",
+        "labelled_accuracy": "Compared with file labels: Risk {risk:.0%} · Urgent {urgent:.0%}",
+        "alerts": "Alerts",
+        "alerts_tab": "Alerts",
+        "actions_tab": "Recommended actions",
+        "map_tab": "Map",
+        "filter_by": "Filter alerts",
+        "filter_priority": "Priority",
+        "filter_urgency": "Urgency",
+        "filter_event": "Event type",
+        "filter_country": "Supplier country",
+        "filter_supplier": "Supplier",
+        "no_alerts_match": "No alerts match the selected filters.",
+        "only_risks": "Show risks only",
+        "priority": "Priority",
+        "news_id": "News ID",
+        "headline": "Headline",
+        "is_risk": "Risk?",
+        "is_urgent": "Urgent?",
+        "affected_suppliers": "Affected supplier IDs",
+        "event_type": "Event type",
+        "confidence": "Confidence",
+        "details": "Details",
+        "why_matters": "Why it matters",
+        "next_steps": "Next steps",
+        "supplier_email": "Draft email to supplier",
+        "alert_source": "Alert drafted by",
+        "original_news": "Original news: ",
+        "risk": "Risk",
+        "yes": "yes",
+        "no": "no",
+        "urgent_label": "Urgent",
+        "type": "Type",
+        "suppliers": "Suppliers",
+        "products_affected": "Affected products",
+        "worst_inventory": "Worst-case inventory",
+        "estimated_duration": "Estimated duration",
+        "not_stated": "not stated",
+        "recommended_action": "Recommended action",
+        "model_reasoning": "Confidence {confidence} · {reasoning}",
+        "map_title": "Exposure map by country",
+        "map_hint": "Hover over a bubble to see its suppliers and materials. Size represents associated annual spend; color shows the highest priority. Points mark approximate country centers, not incident locations or transport routes.",
+        "priority_legend": "Priority: CRITICAL (red) · HIGH (orange) · MEDIUM (yellow) · LOW (blue).",
+        "country": "Country",
+        "affected_supplier_count": "Affected suppliers",
+        "risk_news_count": "Risk news",
+        "urgent_count": "Urgent",
+        "spend_eur": "Associated annual spend (EUR)",
+        "top_priority": "Highest priority",
+        "suppliers_column": "Suppliers",
+        "unmapped": "No coordinates are configured for these countries; they appear in the table but not on the map: ",
+        "no_suppliers": "No affected suppliers were detected in news classified as risk.",
+        "actions_title": "Recommended actions",
+        "actions_hint": "Prioritized by detected alerts and approved alternatives in the data. Confirm availability and capacity before reallocating orders.",
+        "alert_count": "alert(s)",
+        "map_alerts": "alerts",
+        "map_urgent": "urgent",
+        "map_supplier": "Suppliers",
+        "map_priority": "Priority",
+        "inventory": "Inventory",
+        "no_data": "No data",
+        "action": "Action",
+        "contact_alt": "Contact **{alt_id} ({alt_name})** to confirm capacity and lead time; request **{materials}**{products}.",
+        "confirm_supplier": "Confirm inventory and recovery with **{supplier}**. Approved alternative **{alternate}** is also affected; find another source.",
+        "no_approved_alt": "Confirm inventory and recovery with **{supplier}**; no approved alternative is listed.",
+        "material": "Material",
+        "related_news": "Related news",
+        "download": "Download Excel (Results + Details)",
+        "translated_priority": {"CRITICAL": "CRITICAL", "HIGH": "HIGH", "MEDIUM": "MEDIUM", "LOW": "LOW"},
+        "translated_confidence": {"high": "high", "medium": "medium", "low": "low"},
+        "risk_values": {"Y": "Yes", "N": "No"},
+        "urgent_values": {"Y": "Yes", "N": "No"},
+        "events": {},
+        "countries": {},
+    },
+    "es": {
+        "title_caption": "Monitor de noticias de riesgo para los 40 proveedores de Helixa Pharmaceuticals",
+        "input": "Entrada",
+        "source": "Fuente",
+        "live": "Feed del día",
+        "test": "Prueba",
+        "validation": "Validación (con respuestas)",
+        "upload": "Subir Excel",
+        "news_excel": "Excel de noticias",
+        "engine": "Motor",
+        "engine_help": "modelos = nuestros modelos afinados; reglas = línea base sin modelos",
+        "models": "Modelos afinados",
+        "rules": "Reglas (línea base)",
+        "gen_alerts": "Redactar alertas con IA generativa",
+        "gen_help": "Los modelos deciden; la IA generativa solo redacta la alerta. Si no hay un LLM local, se usa una plantilla.",
+        "analyze": "Analizar",
+        "upload_first": "Sube un Excel primero.",
+        "analyzing": "Analizando noticias...",
+        "updating_alerts": "Actualizando el idioma de las alertas...",
+        "analysis_error": "No se pudo analizar: ",
+        "choose_source": "Elige una fuente y pulsa **Analizar**.",
+        "news": "Noticias",
+        "risks": "Riesgos",
+        "urgent": "Urgentes",
+        "annual_spend": "Gasto anual asociado",
+        "time": "Tiempo",
+        "labelled_accuracy": "Contra las respuestas del fichero: Riesgo {risk:.0%} · Urgencia {urgent:.0%}",
+        "alerts": "Alertas",
+        "alerts_tab": "Alertas",
+        "actions_tab": "Acciones recomendadas",
+        "map_tab": "Mapa",
+        "filter_by": "Filtrar alertas",
+        "filter_priority": "Prioridad",
+        "filter_urgency": "Urgencia",
+        "filter_event": "Tipo de evento",
+        "filter_country": "País del proveedor",
+        "filter_supplier": "Proveedor",
+        "no_alerts_match": "Ninguna alerta coincide con los filtros seleccionados.",
+        "only_risks": "Mostrar solo riesgos",
+        "priority": "Prioridad",
+        "news_id": "ID noticia",
+        "headline": "Titular",
+        "is_risk": "¿Riesgo?",
+        "is_urgent": "¿Urgente?",
+        "affected_suppliers": "IDs de proveedores afectados",
+        "event_type": "Tipo de evento",
+        "confidence": "Confianza",
+        "details": "Detalle",
+        "why_matters": "Por qué importa",
+        "next_steps": "Siguientes pasos",
+        "supplier_email": "Borrador de email al proveedor",
+        "alert_source": "Alerta redactada por",
+        "original_news": "Noticia original: ",
+        "risk": "Riesgo",
+        "yes": "sí",
+        "no": "no",
+        "urgent_label": "Urgente",
+        "type": "Tipo",
+        "suppliers": "Proveedores",
+        "products_affected": "Productos afectados",
+        "worst_inventory": "Inventario (peor caso)",
+        "estimated_duration": "Duración estimada",
+        "not_stated": "no indicada",
+        "recommended_action": "Acción recomendada",
+        "model_reasoning": "Confianza {confidence} · {reasoning}",
+        "map_title": "Mapa de exposición por país",
+        "map_hint": "Pasa el cursor sobre una burbuja para ver sus proveedores y materiales. El tamaño representa el gasto anual asociado; el color, la prioridad máxima. Los puntos indican centros aproximados de países, no ubicaciones exactas de incidentes ni rutas de transporte.",
+        "priority_legend": "Prioridad: CRÍTICA (rojo) · ALTA (naranja) · MEDIA (amarillo) · BAJA (azul).",
+        "country": "País",
+        "affected_supplier_count": "Proveedores afectados",
+        "risk_news_count": "Noticias de riesgo",
+        "urgent_count": "Urgentes",
+        "spend_eur": "Gasto anual asociado (EUR)",
+        "top_priority": "Prioridad máxima",
+        "suppliers_column": "Proveedores",
+        "unmapped": "No hay coordenadas configuradas para estos países; aparecen en la tabla, pero no en el mapa: ",
+        "no_suppliers": "No se detectaron proveedores afectados en las noticias clasificadas como riesgo.",
+        "actions_title": "Acciones recomendadas",
+        "actions_hint": "Priorizadas por las alertas detectadas y las alternativas aprobadas en los datos. Confirma disponibilidad y capacidad antes de reasignar pedidos.",
+        "alert_count": "alerta(s)",
+        "map_alerts": "alertas",
+        "map_urgent": "urgentes",
+        "map_supplier": "Proveedores",
+        "map_priority": "Prioridad",
+        "inventory": "Inventario",
+        "no_data": "Sin dato",
+        "action": "Acción",
+        "contact_alt": "Contactar a **{alt_id} ({alt_name})** para confirmar capacidad y plazo; solicitar **{materials}**{products}.",
+        "confirm_supplier": "Confirmar inventario y recuperación con **{supplier}**. La alternativa aprobada **{alternate}** también está afectada: buscar otra fuente.",
+        "no_approved_alt": "Confirmar inventario y recuperación con **{supplier}**; no consta una alternativa aprobada.",
+        "material": "Material",
+        "related_news": "Noticias relacionadas",
+        "download": "Descargar Excel (Results + Details)",
+        "translated_priority": {"CRITICAL": "CRÍTICA", "HIGH": "ALTA", "MEDIUM": "MEDIA", "LOW": "BAJA"},
+        "translated_confidence": {"high": "alta", "medium": "media", "low": "baja"},
+        "risk_values": {"Y": "Sí", "N": "No"},
+        "urgent_values": {"Y": "Sí", "N": "No"},
+        "events": {
+            "Natural disaster": "Desastre natural",
+            "Fire / plant incident": "Incendio / incidente en planta",
+            "Labour strike": "Huelga laboral",
+            "Logistics disruption": "Interrupción logística",
+            "Quality recall": "Retirada por calidad",
+            "Regulatory action": "Medida regulatoria",
+            "Export restriction": "Restricción a la exportación",
+            "Utility outage": "Corte de suministros",
+            "Financial distress": "Dificultades financieras",
+            "Leadership change": "Cambio de dirección",
+            "Acquisition by competitor": "Adquisición por competidor",
+            "Cyber attack": "Ciberataque",
+            "Geopolitical / sanctions": "Riesgo geopolítico / sanciones",
+            "Other risk": "Otro riesgo",
+            "Positive news": "Noticia positiva",
+            "Not relevant": "No relevante",
+        },
+        "countries": {
+            "Belgium": "Bélgica", "Brazil": "Brasil", "China": "China", "Germany": "Alemania",
+            "India": "India", "Ireland": "Irlanda", "Italy": "Italia", "Japan": "Japón",
+            "Mexico": "México", "Morocco": "Marruecos", "Netherlands": "Países Bajos",
+            "Norway": "Noruega", "Poland": "Polonia", "Puerto Rico (USA)": "Puerto Rico (EE. UU.)",
+            "Singapore": "Singapur", "Spain": "España", "Switzerland": "Suiza", "Taiwan": "Taiwán",
+            "USA": "EE. UU.", "Vietnam": "Vietnam",
+        },
+    },
+}
+T = TEXT[lang]
+PRIORITY_LABELS = T["translated_priority"]
+CONFIDENCE_LABELS = T["translated_confidence"]
+EVENT_LABELS = T["events"]
+COUNTRY_LABELS = T["countries"]
+
+SUP = load_suppliers().set_index("Supplier_ID")
+MATERIALS = load_materials()
+COLORS = {"CRITICAL": "#f4a6a6", "HIGH": "#f8cbad", "MEDIUM": "#ffe699", "LOW": "#ffffff"}
+ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+MAP_COLORS = {
+    "CRITICAL": [200, 62, 77, 210],
+    "HIGH": [237, 139, 50, 210],
+    "MEDIUM": [227, 183, 47, 210],
+    "LOW": [57, 119, 183, 210],
+}
+
+
+def display_action(row) -> str:
+    if row.Is_Risk != "Y":
+        return "No action needed." if lang == "en" else "No se requiere ninguna acción."
+
+    ids = ids_of(row.Affected_Supplier_IDs)
+    single_source = {
+        supplier_id.strip()
+        for supplier_id in str(row.Single_Source_Affected or "").split(",")
+        if supplier_id.strip()
+    }
+    actions = []
+    for supplier_id in ids:
+        if supplier_id not in SUP.index:
+            continue
+        alternate_id = SUP.loc[supplier_id, "Approved_Alternate_ID"]
+        if not isinstance(alternate_id, str) or alternate_id not in SUP.index:
+            continue
+        if alternate_id in ids:
+            text = (
+                f"Approved alternate for {supplier_id} is also affected; identify another source."
+                if lang == "en" else
+                f"La alternativa aprobada de {supplier_id} también está afectada; buscar otra fuente."
+            )
+        else:
+            text = (
+                f"Contact approved alternate {alternate_id} for {SUP.loc[alternate_id, 'Supplier_Name']}."
+                if lang == "en" else
+                f"Contactar con la alternativa aprobada {alternate_id} "
+                f"({SUP.loc[alternate_id, 'Supplier_Name']})."
+            )
+        actions.append(text)
+
+    uncovered_single_sources = sorted(
+        supplier_id for supplier_id in single_source
+        if supplier_id in SUP.index
+        and not (
+            isinstance(SUP.loc[supplier_id, "Approved_Alternate_ID"], str)
+            and SUP.loc[supplier_id, "Approved_Alternate_ID"] in SUP.index
+        )
+    )
+    if uncovered_single_sources:
+        ids_text = ", ".join(uncovered_single_sources)
+        actions.append(
+            f"Secure stock and qualify a second source for {ids_text}."
+            if lang == "en" else
+            f"Asegurar existencias y homologar una segunda fuente para {ids_text}."
+        )
+
+    days = row.Duration_Days
+    cover = row.Min_Inventory_Days
+    if row.Stockout_Risk == "Y" and pd.notna(days) and pd.notna(cover):
+        actions.append(
+            f"Expedite orders: the estimated event ({days:.0f} days) may outlast inventory ({cover:.0f} days)."
+            if lang == "en" else
+            f"Acelerar pedidos: el evento estimado ({days:.0f} días) puede durar más que el inventario ({cover:.0f} días)."
+        )
+    elif row.Stockout_Risk == "N" and pd.notna(days) and pd.notna(cover):
+        actions.append(
+            f"Inventory ({cover:.0f} days) covers the estimated event ({days:.0f} days); monitor weekly."
+            if lang == "en" else
+            f"El inventario ({cover:.0f} días) cubre el evento estimado ({days:.0f} días); revisar semanalmente."
+        )
+    elif pd.notna(cover):
+        actions.append(
+            f"Confirm the supplier's restart date; inventory covers {cover:.0f} days."
+            if lang == "en" else
+            f"Confirmar la fecha de reanudación con el proveedor; hay {cover:.0f} días de inventario."
+        )
+    return " ".join(dict.fromkeys(actions)) or ("Monitor." if lang == "en" else "Realizar seguimiento.")
+
+
+with st.sidebar:
+    st.header(T["input"])
+    src_options = ["Live Day feed", "Test", "Validación (con respuestas)", "Subir Excel"]
+    src_labels = {
+        "Live Day feed": T["live"],
+        "Test": T["test"],
+        "Validación (con respuestas)": T["validation"],
+        "Subir Excel": T["upload"],
+    }
+    src = st.radio(T["source"], src_options, format_func=src_labels.get)
+    up = st.file_uploader(T["news_excel"], type=["xlsx"]) if src == "Subir Excel" else None
+    mode = st.selectbox(
+        T["engine"],
+        ["models", "rules"],
+        format_func={"models": T["models"], "rules": T["rules"]}.get,
+        help=T["engine_help"],
+    )
+    gen = st.checkbox(T["gen_alerts"], value=True, help=T["gen_help"])
+    go = st.button(T["analyze"], type="primary", use_container_width=True)
+
+st.title("Supplier Risk Radar")
+st.caption(T["title_caption"])
+
 if go:
     try:
-        if src == "Upload Excel":
+        if src == "Subir Excel":
             if up is None:
-                st.error("Upload an Excel file first.")
+                st.error(T["upload_first"])
                 st.stop()
             news = load_news(up)
         else:
-            news = load_news({"Live Day feed": LIVE, "Test": TEST, "Validation (labelled)": VALID}[src])
-        pool = load_pool(include_valid=(src != "Validation (labelled)"))
-        with st.spinner("Analysing news articles..."):
-            res = analyze_news(news, pool, mode)
-        st.session_state["res"] = res
-        st.session_state["news"] = news
-    except Exception as e:
-        st.error(f"Analysis failed: {e}")
+            news = load_news({"Live Day feed": LIVE, "Test": TEST, "Validación (con respuestas)": VALID}[src])
+        pool = load_pool(include_valid=(src != "Validación (con respuestas)"))
+        with st.spinner(T["analyzing"]):
+            res = analyze_news(news, pool, mode, alerts=gen, alert_lang=lang)
+        st.session_state["res"], st.session_state["news"] = res, news
+        st.session_state["analysis_language"] = lang
+        st.session_state["analysis_alerts"] = gen
+    except Exception as e:  # noqa: BLE001
+        st.error(f"{T['analysis_error']}{e}")
         st.stop()
 
 if "res" not in st.session_state:
-    st.markdown("""
-    <div style="text-align:center; padding: 4rem 2rem;">
-        <p style="font-size: 3rem; margin-bottom: 1rem;">📡</p>
-        <h3 style="color: #999;">Waiting for analysis</h3>
-        <p style="color: #666;">Select a news source and click <strong>Analyse</strong> in the sidebar</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.info(T["choose_source"])
     st.stop()
+
+if st.session_state.get("analysis_language") != lang:
+    res = st.session_state["res"]
+    if st.session_state.get("analysis_alerts") and "Alert_Title" in res.columns:
+        with st.spinner(T["updating_alerts"]):
+            res = add_alerts(
+                res,
+                st.session_state["news"],
+                SUP.reset_index(),
+                lang=lang,
+                use_llm=True,
+            )
+        st.session_state["res"] = res
+    st.session_state["analysis_language"] = lang
 
 res: pd.DataFrame = st.session_state["res"]
 news: pd.DataFrame = st.session_state["news"]
-res["_o"] = res["Priority"].map(PRIORITY_ORDER)
+res["_o"] = res["Priority"].map(ORDER)
 res = res.sort_values(["_o", "News_ID"]).drop(columns="_o").reset_index(drop=True)
 
-# ── KPI Row ──────────────────────────────────────────────────────────────────
-n_total = len(res)
-n_risk = int((res.Is_Risk == "Y").sum())
-n_urgent = int((res.Urgent == "Y").sum())
-n_critical = int((res.Priority == "CRITICAL").sum())
-spend = res.loc[res.Is_Risk == "Y", "Spend_At_Risk_EUR"].sum()
-secs = res.attrs.get("seconds", 0)
+risk_res = res[res.Is_Risk == "Y"]
+supplier_news = {}
+for row in risk_res.itertuples():
+    for supplier_id in set(ids_of(row.Affected_Supplier_IDs)):
+        if supplier_id not in SUP.index:
+            continue
+        entry = supplier_news.setdefault(
+            supplier_id, {"news_ids": set(), "urgent_news_ids": set(), "priority": "LOW"}
+        )
+        entry["news_ids"].add(row.News_ID)
+        if row.Urgent == "Y":
+            entry["urgent_news_ids"].add(row.News_ID)
+        if ORDER.get(row.Priority, len(ORDER)) < ORDER.get(entry["priority"], len(ORDER)):
+            entry["priority"] = row.Priority
 
-cols = st.columns(6)
-kpis = [
-    ("📰", str(n_total), "Articles Scanned", ""),
-    ("⚠️", str(n_risk), "Risks Detected", "warn" if n_risk > 0 else "ok"),
-    ("🔴", str(n_critical), "Critical Alerts", "critical" if n_critical > 0 else "ok"),
-    ("🚨", str(n_urgent), "Urgent Actions", "critical" if n_urgent > 0 else "ok"),
-    ("💰", eur(spend), "Spend at Risk", "warn" if spend > 0 else "ok"),
-    ("⏱️", f"{secs:.1f}s", "Processing Time", "ok"),
-]
-for col, (icon, val, label, cls) in zip(cols, kpis):
-    col.markdown(f"""
-    <div class="kpi-card {cls}">
-        <div style="font-size:1.5rem;">{icon}</div>
-        <div class="kpi-value">{val}</div>
-        <div class="kpi-label">{label}</div>
-    </div>
-    """, unsafe_allow_html=True)
+k = st.columns(5)
+k[0].metric(T["news"], len(res))
+k[1].metric(T["risks"], int((res.Is_Risk == "Y").sum()))
+k[2].metric(T["urgent"], int((res.Urgent == "Y").sum()))
+k[3].metric(
+    T["annual_spend"],
+    eur(sum(float(SUP.loc[supplier_id, "Annual_Spend_EUR"]) for supplier_id in supplier_news)),
+)
+k[4].metric(T["time"], f"{res.attrs.get('seconds', 0):.1f} s")
 
-st.markdown("<br>", unsafe_allow_html=True)
-
-# ── Accuracy (if labelled) ───────────────────────────────────────────────────
 if is_labelled(news):
     g = news.set_index("News_ID")
     m = res.set_index("News_ID")
     acc_r = (m.Is_Risk == g.loc[m.index, "Is_Risk"]).mean()
     acc_u = (m.Urgent == g.loc[m.index, "Urgent"]).mean()
-    st.markdown(f"""
-    <div class="accuracy-bar">
-        <span style="font-size:1.3rem;">🎯</span>
-        <span style="color:#ccc;">Accuracy vs expert labels:</span>
-        <span class="accuracy-val">Is_Risk {acc_r:.0%}</span>
-        <span style="color:#666;">|</span>
-        <span class="accuracy-val">Urgent {acc_u:.0%}</span>
-    </div>
-    """, unsafe_allow_html=True)
+    st.success(T["labelled_accuracy"].format(risk=acc_r, urgent=acc_u))
 
-# ── Tabs ─────────────────────────────────────────────────────────────────────
-tab_alerts, tab_suppliers, tab_data = st.tabs(["🚨 Alerts", "🏭 Supplier Map", "📋 Raw Data"])
+tabs = st.tabs([T["alerts_tab"], T["actions_tab"], T["map_tab"]])
+with tabs[0]:
+    st.subheader(T["alerts"])
+    only_risk = st.checkbox(T["only_risks"], value=True, key="alert_filter_risks_only")
+    st.caption(T["filter_by"])
+    filter_columns = st.columns(5)
+    priority_options = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+    selected_priorities = filter_columns[0].multiselect(
+        T["filter_priority"],
+        priority_options,
+        format_func=PRIORITY_LABELS.get,
+        key="alert_filter_priority",
+    )
+    selected_urgencies = filter_columns[1].multiselect(
+        T["filter_urgency"],
+        ["Y", "N"],
+        format_func=T["urgent_values"].get,
+        key="alert_filter_urgency",
+    )
+    event_options = sorted(res["Event_Type"].dropna().unique())
+    selected_events = filter_columns[2].multiselect(
+        T["filter_event"],
+        event_options,
+        format_func=lambda value: EVENT_LABELS.get(value, value),
+        key="alert_filter_event",
+    )
+    supplier_ids = sorted({
+        supplier_id
+        for affected in res["Affected_Supplier_IDs"].dropna()
+        for supplier_id in ids_of(affected)
+        if supplier_id in SUP.index
+    })
+    supplier_labels = {
+        f"{supplier_id} · {SUP.loc[supplier_id, 'Supplier_Name']}": supplier_id
+        for supplier_id in supplier_ids
+    }
+    selected_supplier_labels = filter_columns[3].multiselect(
+        T["filter_supplier"],
+        list(supplier_labels),
+        key="alert_filter_supplier",
+    )
+    countries = sorted({
+        SUP.loc[supplier_id, "Country"]
+        for supplier_id in supplier_ids
+    })
+    selected_countries = filter_columns[4].multiselect(
+        T["filter_country"],
+        countries,
+        format_func=lambda value: COUNTRY_LABELS.get(value, value),
+        key="alert_filter_country",
+    )
 
-# ── Tab 1: Alerts ────────────────────────────────────────────────────────────
-with tab_alerts:
-    col_filter, col_search = st.columns([1, 2])
-    with col_filter:
-        show = st.multiselect("Filter by priority", ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
-                               default=["CRITICAL", "HIGH", "MEDIUM"])
-    with col_search:
-        q = st.text_input("🔍 Search headlines", placeholder="fire, strike, export...")
+    view = res[res.Is_Risk == "Y"].copy() if only_risk else res.copy()
+    selected_supplier_ids = {
+        supplier_labels[label] for label in selected_supplier_labels
+    }
+    selected_country_supplier_ids = {
+        supplier_id for supplier_id in supplier_ids
+        if not selected_countries or SUP.loc[supplier_id, "Country"] in selected_countries
+    }
+    if selected_priorities:
+        view = view[view["Priority"].isin(selected_priorities)]
+    if selected_urgencies:
+        view = view[view["Urgent"].isin(selected_urgencies)]
+    if selected_events:
+        view = view[view["Event_Type"].isin(selected_events)]
+    if selected_supplier_ids:
+        view = view[view["Affected_Supplier_IDs"].map(
+            lambda affected: bool(set(ids_of(affected)) & selected_supplier_ids)
+        )]
+    if selected_countries:
+        view = view[view["Affected_Supplier_IDs"].map(
+            lambda affected: bool(set(ids_of(affected)) & selected_country_supplier_ids)
+        )]
+    cols = ["Priority", "News_ID", "Headline", "Is_Risk", "Urgent", "Affected_Supplier_IDs", "Event_Type", "Spend_At_Risk_EUR", "Confidence"]
+    table = view[cols].copy()
+    table["Priority"] = table["Priority"].map(PRIORITY_LABELS)
+    table["Is_Risk"] = table["Is_Risk"].map(T["risk_values"])
+    table["Urgent"] = table["Urgent"].map(T["urgent_values"])
+    table["Event_Type"] = table["Event_Type"].map(lambda value: EVENT_LABELS.get(value, value))
+    table["Confidence"] = table["Confidence"].map(CONFIDENCE_LABELS).fillna(table["Confidence"])
+    table = table.rename(columns={
+        "Priority": T["priority"],
+        "News_ID": T["news_id"],
+        "Headline": T["headline"],
+        "Is_Risk": T["is_risk"],
+        "Urgent": T["is_urgent"],
+        "Affected_Supplier_IDs": T["affected_suppliers"],
+        "Event_Type": T["event_type"],
+        "Spend_At_Risk_EUR": T["annual_spend"],
+        "Confidence": T["confidence"],
+    })
+    priority_colors = {PRIORITY_LABELS[key]: value for key, value in COLORS.items()}
+    priority_column = T["priority"]
+    try:
+        if not table.empty:
+            st.dataframe(table.style.apply(
+                lambda row: [f"background-color: {priority_colors[row[priority_column]]}"] * len(row),
+                axis=1,
+            ), use_container_width=True, hide_index=True)
+    except Exception:  # noqa: BLE001
+        if not table.empty:
+            st.dataframe(table, use_container_width=True, hide_index=True)
+    if table.empty:
+        st.info(T["no_alerts_match"])
 
-    view = res[res.Priority.isin(show)] if show else res
-    if q:
-        view = view[view.Headline.str.contains(q, case=False, na=False) |
-                     view.get("Reasoning", pd.Series(dtype=str)).str.contains(q, case=False, na=False)]
-
+    st.subheader(T["details"])
     for r in view.itertuples():
-        prio_lower = r.Priority.lower()
-        badge_cls = f"badge-{prio_lower}"
-        st.markdown(f"""
-        <div class="alert-card alert-{prio_lower}">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
-                <div>
-                    <span class="badge {badge_cls}">{r.Priority}</span>
-                    <span style="color:#888; margin-left:0.5rem; font-size:0.8rem;">{r.News_ID}</span>
-                </div>
-                <span style="color:#888; font-size:0.75rem;">Confidence: {r.Confidence}</span>
-            </div>
-            <div style="font-size:1rem; font-weight:600; color:#eee; margin-bottom:0.4rem;">{r.Headline}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        with st.expander("View details", expanded=(r.Priority == "CRITICAL")):
+        label = f"{PRIORITY_LABELS.get(r.Priority, r.Priority)} · {r.News_ID} · {r.Headline}"
+        with st.expander(label, expanded=(r.Priority == "CRITICAL")):
             text = news.loc[news.News_ID == r.News_ID, "Summary"].iloc[0]
-            st.markdown(f"<p style='color:#bbb; font-size:0.9rem;'>{text}</p>", unsafe_allow_html=True)
-
+            if getattr(r, "Alert_Title", ""):
+                st.markdown(f"#### {r.Alert_Title}")
+                st.write(r.Alert_Summary)
+                st.markdown(f"**{T['why_matters']}:** {r.Alert_Why}")
+                st.markdown(f"**{T['next_steps']}:**\n{r.Alert_Steps}")
+                with st.popover(T["supplier_email"]):
+                    st.text(r.Alert_Email)
+                st.caption(f"{T['alert_source']}: {r.Alert_Source}")
+                st.divider()
+                st.caption(T["original_news"] + text)
+            else:
+                st.write(text)
             c1, c2 = st.columns(2)
             with c1:
-                risk_icon = "🔴" if r.Is_Risk == "Y" else "🟢"
-                urgent_icon = "🔴" if r.Urgent == "Y" else "⚪"
-                st.markdown(f"""
-                <div class="info-grid">
-                    <div class="info-item">{risk_icon} <strong>Risk:</strong> {'Yes' if r.Is_Risk == 'Y' else 'No'}</div>
-                    <div class="info-item">{urgent_icon} <strong>Urgent:</strong> {'Yes' if r.Urgent == 'Y' else 'No'}</div>
-                    <div class="info-item">📌 <strong>Event:</strong> {r.Event_Type}</div>
-                    <div class="info-item">💰 <strong>Spend at risk:</strong> {eur(r.Spend_At_Risk_EUR) if r.Is_Risk == 'Y' else 'N/A'}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
+                is_risk_text = T["yes"] if r.Is_Risk == "Y" else T["no"]
+                is_urgent_text = T["yes"] if r.Urgent == "Y" else T["no"]
+                event_text = EVENT_LABELS.get(r.Event_Type, r.Event_Type)
+                st.markdown(
+                    f"**{T['risk']}:** {is_risk_text} · **{T['urgent_label']}:** {is_urgent_text} · "
+                    f"**{T['type']}:** {event_text}"
+                )
                 ids = ids_of(r.Affected_Supplier_IDs)
                 if ids:
-                    tags = "".join(
-                        f'<span class="sup-tag">{i} — {SUP.loc[i, "Supplier_Name"]} ({SUP.loc[i, "City"]})</span>'
-                        for i in ids if i in SUP.index
+                    st.markdown(
+                        f"**{T['suppliers']}:** " + ", ".join(
+                            f"{i} {SUP.loc[i, 'Supplier_Name']} ({SUP.loc[i, 'City']})"
+                            for i in ids if i in SUP.index
+                        )
                     )
-                    st.markdown(f"**Affected suppliers:** {tags}", unsafe_allow_html=True)
-
-                if hasattr(r, "Products_At_Risk") and r.Products_At_Risk:
-                    st.markdown(f"**Products at risk:** {r.Products_At_Risk}")
-
+                if r.Products_At_Risk:
+                    st.markdown(f"**{T['products_affected']}:** {r.Products_At_Risk}")
             with c2:
                 if r.Is_Risk == "Y":
-                    inv = r.Min_Inventory_Days
-                    dur = r.Duration_Days
-                    inv_str = f"{inv:.0f} days" if inv == inv and inv is not None else "unknown"
-                    dur_str = f"{dur:.0f} days" if dur == dur and dur is not None else "not stated"
-                    st.markdown(f"""
-                    <div class="info-grid">
-                        <div class="info-item">📦 <strong>Inventory cover:</strong> {inv_str}</div>
-                        <div class="info-item">⏳ <strong>Est. duration:</strong> {dur_str}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    if hasattr(r, "Action") and r.Action:
-                        st.markdown(f'<div class="action-box">💡 <strong>Recommended action:</strong> {r.Action}</div>',
-                                    unsafe_allow_html=True)
-
-            st.caption(f"Reasoning: {r.Reasoning}")
-
-# ── Tab 2: Supplier Map ─────────────────────────────────────────────────────
-with tab_suppliers:
-    st.markdown("### Supplier Portfolio Overview")
-
-    affected_ids = set()
-    for _, row in res[res.Is_Risk == "Y"].iterrows():
-        affected_ids.update(ids_of(row["Affected_Supplier_IDs"]))
-
-    sup_view = SUP.copy()
-    sup_view["Status"] = sup_view.index.map(lambda i: "⚠️ AT RISK" if i in affected_ids else "✅ OK")
-    sup_view["Spend_M"] = (sup_view["Annual_Spend_EUR"] / 1e6).round(2)
-
-    col_s1, col_s2 = st.columns([2, 1])
-    with col_s1:
-        display_cols = ["Supplier_Name", "Status", "Country", "City", "Material_Supplied",
-                        "Spend_M", "Single_Source", "Criticality", "Inventory_Cover_Days"]
-        st.dataframe(
-            sup_view[display_cols].sort_values("Status", ascending=False),
-            use_container_width=True, hide_index=False,
-            column_config={
-                "Spend_M": st.column_config.NumberColumn("Spend (M EUR)", format="%.2f"),
-                "Inventory_Cover_Days": st.column_config.NumberColumn("Inv. Days", format="%.0f"),
-            }
+                    st.markdown(f"**{T['annual_spend']}:** {eur(r.Spend_At_Risk_EUR)}")
+                    if r.Min_Inventory_Days == r.Min_Inventory_Days and r.Min_Inventory_Days is not None:
+                        duration_text = (
+                            f"{r.Duration_Days:.0f} days" if lang == "en" else f"{r.Duration_Days:.0f} días"
+                        ) if r.Duration_Days == r.Duration_Days and r.Duration_Days is not None else T["not_stated"]
+                        day_unit = "days" if lang == "en" else "días"
+                        st.markdown(
+                            f"**{T['worst_inventory']}:** {r.Min_Inventory_Days:.0f} {day_unit} · "
+                            f"**{T['estimated_duration']}:** {duration_text}"
+                        )
+                    st.markdown(f"**{T['recommended_action']}:** {display_action(r)}")
+            confidence_text = CONFIDENCE_LABELS.get(str(r.Confidence).lower(), r.Confidence)
+            reasoning = r.Reasoning
+            if lang == "es":
+                reasoning = (
+                    str(reasoning)
+                    .replace("p_risk=", "prob. riesgo=")
+                    .replace("p_urgent=", "prob. urgencia=")
+                    .replace("links:", "vínculos:")
+                    .replace("no direct hint", "sin coincidencia directa")
+                    .replace("no supplier linked", "sin proveedor vinculado")
+                    .replace("positive keywords", "palabras clave positivas")
+                    .replace("keyword rules", "reglas de palabras clave")
+                    .replace("none", "ninguno")
+                )
+            st.caption(T["model_reasoning"].format(confidence=confidence_text, reasoning=reasoning))
+with tabs[1]:
+    if supplier_news:
+        st.subheader(T["actions_title"])
+        st.caption(T["actions_hint"])
+        ordered_suppliers = sorted(
+            supplier_news.items(),
+            key=lambda item: (ORDER.get(item[1]["priority"], len(ORDER)), item[0]),
         )
+        for start in range(0, len(ordered_suppliers), 3):
+            columns = st.columns(3)
+            for column, (supplier_id, entry) in zip(columns, ordered_suppliers[start:start + 3]):
+                supplier = SUP.loc[supplier_id]
+                alternate_id = supplier["Approved_Alternate_ID"]
+                supplier_materials = MATERIALS[MATERIALS["Primary_Supplier_ID"] == supplier_id]
+                inventory = supplier["Inventory_Cover_Days"]
+                day_unit = "days" if lang == "en" else "días"
+                inventory_text = f"{inventory:.0f} {day_unit}" if pd.notna(inventory) else T["no_data"]
+                with column:
+                    with st.container(border=True):
+                        urgency_label = (
+                            ("URGENT · " if lang == "en" else "URGENTE · ")
+                            if entry["urgent_news_ids"] else ""
+                        )
+                        badge_colors = {"CRITICAL": "red", "HIGH": "orange", "MEDIUM": "yellow", "LOW": "blue"}
+                        st.badge(
+                            f"{urgency_label}{PRIORITY_LABELS[entry['priority']]}",
+                            color=badge_colors.get(entry["priority"], "gray"),
+                        )
+                        st.markdown(f"**{supplier_id} · {supplier['Supplier_Name']}**")
+                        st.caption(
+                            f"{COUNTRY_LABELS.get(supplier['Country'], supplier['Country'])} · "
+                            f"{len(entry['news_ids'])} {T['alert_count']} · {T['inventory']}: {inventory_text}"
+                        )
 
-    with col_s2:
-        st.markdown("##### Risk Summary")
-        st.metric("Suppliers at Risk", len(affected_ids))
-        st.metric("Spend at Risk", eur(sup_view.loc[sup_view.index.isin(affected_ids), "Annual_Spend_EUR"].sum()))
-        st.metric("Single-Source at Risk", len([i for i in affected_ids if i in SUP.index and SUP.loc[i, "Single_Source"] == "Y"]))
+                        if isinstance(alternate_id, str) and alternate_id in SUP.index and alternate_id not in supplier_news:
+                            matched_materials = supplier_materials[
+                                supplier_materials["Alternate_Supplier_ID"] == alternate_id
+                            ]
+                            material_names = []
+                            for material in matched_materials.itertuples():
+                                name = str(material.Material)
+                                if pd.notna(material.Monthly_Requirement):
+                                    quantity = float(material.Monthly_Requirement)
+                                    quantity_text = f"{quantity:.0f}" if quantity.is_integer() else f"{quantity:g}"
+                                    month_unit = "month" if lang == "en" else "mes"
+                                    name += f" ({quantity_text} {material.Unit}/{month_unit})"
+                                material_names.append(name)
+                            if not material_names:
+                                material_names = [str(supplier["Material_Supplied"])]
+                            product_names = sorted({
+                                product.strip()
+                                for products in matched_materials["Used_In_Products"].dropna().astype(str)
+                                for product in products.split(";")
+                                if product.strip()
+                            })
+                            material_text = ", ".join(material_names)
+                            if product_names:
+                                product_text = (
+                                    f" for {', '.join(product_names)}" if lang == "en"
+                                    else f" para {', '.join(product_names)}"
+                                )
+                            else:
+                                product_text = ""
+                            action = T["contact_alt"].format(
+                                alt_id=alternate_id,
+                                alt_name=SUP.loc[alternate_id, "Supplier_Name"],
+                                materials=material_text,
+                                products=product_text,
+                            )
+                        elif isinstance(alternate_id, str) and alternate_id in supplier_news:
+                            action = T["confirm_supplier"].format(supplier=supplier_id, alternate=alternate_id)
+                        else:
+                            action = T["no_approved_alt"].format(supplier=supplier_id)
+                        st.markdown(f"**{T['action']}:** {action}")
+                        st.caption(f"{T['material']}: {supplier['Material_Supplied']}")
+                        st.caption(f"{T['related_news']}: {', '.join(sorted(entry['news_ids']))}")
+with tabs[2]:
+    st.subheader(T["map_title"])
+    if supplier_news:
+        country_locations = {
+            "Belgium": (50.5, 4.5),
+            "Brazil": (-10.8, -52.9),
+            "China": (35.9, 104.2),
+            "Germany": (51.2, 10.5),
+            "India": (22.6, 79.0),
+            "Ireland": (53.1, -7.7),
+            "Italy": (41.9, 12.6),
+            "Japan": (36.2, 138.3),
+            "Mexico": (23.6, -102.5),
+            "Morocco": (31.8, -7.1),
+            "Netherlands": (52.1, 5.3),
+            "Norway": (61.0, 8.5),
+            "Poland": (52.0, 19.1),
+            "Puerto Rico (USA)": (18.2, -66.5),
+            "Singapore": (1.35, 103.8),
+            "Spain": (40.2, -3.7),
+            "Switzerland": (46.8, 8.2),
+            "Taiwan": (23.7, 121.0),
+            "USA": (39.8, -98.6),
+            "Vietnam": (16.2, 107.8),
+        }
+        country_exposure = {}
+        for supplier_id, entry in supplier_news.items():
+            supplier = SUP.loc[supplier_id]
+            country = supplier["Country"]
+            entry_country = country_exposure.setdefault(country, {
+                "suppliers": [],
+                "news_ids": set(),
+                "urgent_news_ids": set(),
+                "spend": 0.0,
+                "priority": "LOW",
+            })
+            entry_country["suppliers"].append({
+                "id": supplier_id,
+                "name": supplier["Supplier_Name"],
+                "material": supplier["Material_Supplied"],
+                "priority": entry["priority"],
+                "news_count": len(entry["news_ids"]),
+                "urgent_count": len(entry["urgent_news_ids"]),
+            })
+            entry_country["news_ids"].update(entry["news_ids"])
+            entry_country["urgent_news_ids"].update(entry["urgent_news_ids"])
+            entry_country["spend"] += float(supplier["Annual_Spend_EUR"])
+            if ORDER.get(entry["priority"], len(ORDER)) < ORDER.get(entry_country["priority"], len(ORDER)):
+                entry_country["priority"] = entry["priority"]
 
-        st.markdown("##### By Country")
-        country_risk = sup_view[sup_view.index.isin(affected_ids)].groupby("Country").size().sort_values(ascending=False)
-        if len(country_risk):
-            st.bar_chart(country_risk)
+        country_rows = []
+        map_rows = []
+        max_spend = max(item["spend"] for item in country_exposure.values())
+        for country, entry in country_exposure.items():
+            location = country_locations.get(country)
+            suppliers_text = "\n".join(
+                f"{item['id']} {item['name']} — {item['material']} | "
+                f"{T['map_priority']}: {PRIORITY_LABELS[item['priority']]} | "
+                f"{item['news_count']} {T['map_alerts']}, {item['urgent_count']} {T['map_urgent']}"
+                for item in sorted(entry["suppliers"], key=lambda item: item["id"])
+            )
+            country_rows.append({
+                T["country"]: COUNTRY_LABELS.get(country, country),
+                T["affected_supplier_count"]: len(entry["suppliers"]),
+                T["risk_news_count"]: len(entry["news_ids"]),
+                T["urgent_count"]: len(entry["urgent_news_ids"]),
+                T["spend_eur"]: entry["spend"],
+                T["top_priority"]: PRIORITY_LABELS[entry["priority"]],
+                T["suppliers_column"]: "; ".join(
+                    f"{item['id']} {item['name']}" for item in sorted(entry["suppliers"], key=lambda item: item["id"])
+                ),
+            })
+            if location:
+                map_rows.append({
+                    "latitude": location[0],
+                    "longitude": location[1],
+                    "radius": 90_000 + 260_000 * entry["spend"] / max_spend,
+                    "fill_color": MAP_COLORS[entry["priority"]],
+                    "tooltip": (
+                        f"{COUNTRY_LABELS.get(country, country)}\n"
+                        f"{T['affected_supplier_count']}: {len(entry['suppliers'])} | "
+                        f"{T['risk_news_count']}: {len(entry['news_ids'])} | "
+                        f"{T['urgent_count']}: {len(entry['urgent_news_ids'])}\n"
+                        f"{T['annual_spend']}: {eur(entry['spend'])}\n"
+                        f"{T['top_priority']}: {PRIORITY_LABELS[entry['priority']]}\n\n"
+                        f"{suppliers_text}"
+                    ),
+                })
 
-# ── Tab 3: Raw Data ──────────────────────────────────────────────────────────
-with tab_data:
-    st.markdown("### Full Results Table")
-    display_res_cols = ["Priority", "News_ID", "Headline", "Is_Risk", "Urgent", "Affected_Supplier_IDs",
-                        "Event_Type", "Spend_At_Risk_EUR", "Confidence", "Reasoning"]
-    available = [c for c in display_res_cols if c in res.columns]
-    st.dataframe(res[available], use_container_width=True, hide_index=True)
+        country_table = pd.DataFrame(country_rows).sort_values(
+            [T["spend_eur"], T["country"]], ascending=[False, True]
+        )
+        st.caption(T["map_hint"])
+        st.caption(T["priority_legend"])
+        if map_rows:
+            layer = pdk.Layer(
+                "ScatterplotLayer",
+                data=pd.DataFrame(map_rows),
+                get_position="[longitude, latitude]",
+                get_radius="radius",
+                get_fill_color="fill_color",
+                get_line_color=[255, 255, 255, 220],
+                line_width_min_pixels=1,
+                stroked=True,
+                filled=True,
+                pickable=True,
+                radius_min_pixels=8,
+                radius_max_pixels=36,
+            )
+            deck = pdk.Deck(
+                layers=[layer],
+                initial_view_state=pdk.ViewState(latitude=25, longitude=0, zoom=1),
+                map_provider="carto",
+                tooltip={
+                    "text": "{tooltip}",
+                    "style": {
+                        "backgroundColor": "#20242c",
+                        "color": "white",
+                        "fontSize": "13px",
+                        "padding": "12px",
+                        "maxWidth": "420px",
+                        "whiteSpace": "pre-wrap",
+                    },
+                },
+            )
+            st.pydeck_chart(deck, use_container_width=True, height=520)
+        unmapped = sorted(set(country_exposure) - set(country_locations))
+        if unmapped:
+            st.warning(T["unmapped"] + ", ".join(COUNTRY_LABELS.get(country, country) for country in unmapped))
+        st.dataframe(country_table, use_container_width=True, hide_index=True)
+    else:
+        st.info(T["no_suppliers"])
 
-    st.divider()
-    buf = io.BytesIO()
-    save_excel(res, buf)
-    st.download_button("📥 Download Excel (Results + Details)", buf.getvalue(), "supplier_risk_result.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       use_container_width=True)
+buf = io.BytesIO()
+save_excel(res, buf)
+st.download_button(T["download"], buf.getvalue(), "supplier_risk_result.xlsx",
+                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

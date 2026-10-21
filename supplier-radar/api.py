@@ -137,12 +137,62 @@ def get_kpis() -> dict[str, Any]:
         else:
             most_exposed = {"id": top_id, "name": "", "country": "", "alert_count": top_count}
 
+    # --- Extended KPIs ---
+
+    # Spend at risk
+    spend_at_risk = float(risk_df["Spend_At_Risk_EUR"].sum()) if "Spend_At_Risk_EUR" in df.columns else 0
+
+    # Total spend (all suppliers)
+    total_spend = float(suppliers_df["Annual_Spend_EUR"].sum())
+
+    # Single Source Exposure: % of total spend from single-source suppliers
+    single_source_suppliers = suppliers_df[suppliers_df["Single_Source"] == "Yes"]
+    single_source_spend = float(single_source_suppliers["Annual_Spend_EUR"].sum())
+    single_source_pct = round(single_source_spend / total_spend * 100, 1) if total_spend > 0 else 0
+
+    # Alternative Coverage: % of suppliers with an approved alternate
+    has_alt = suppliers_df["Approved_Alternate_ID"].notna() & (suppliers_df["Approved_Alternate_ID"] != "")
+    alt_coverage_pct = round(has_alt.sum() / len(suppliers_df) * 100, 1) if len(suppliers_df) > 0 else 0
+
+    # Stockout Countdown: min inventory days among at-risk suppliers
+    at_risk_suppliers = suppliers_df[suppliers_df["Supplier_ID"].astype(str).isin(affected_set)]
+    stockout_countdown = None
+    if not at_risk_suppliers.empty and "Inventory_Cover_Days" in at_risk_suppliers.columns:
+        inv = at_risk_suppliers["Inventory_Cover_Days"].dropna()
+        if len(inv):
+            stockout_countdown = int(inv.min())
+
+    # Category Risk Heatmap: spend at risk per category
+    category_risk: dict[str, float] = {}
+    for sid in affected_set:
+        row = suppliers_df[suppliers_df["Supplier_ID"].astype(str) == sid]
+        if not row.empty:
+            cat = row.iloc[0].get("Category", "Other")
+            category_risk[cat] = category_risk.get(cat, 0) + float(row.iloc[0].get("Annual_Spend_EUR", 0))
+
+    # Alerts by event type
+    event_counts: dict[str, int] = {}
+    for ev in risk_df.get("Event_Type", []):
+        if ev:
+            event_counts[ev] = event_counts.get(ev, 0) + 1
+
+    # Urgent count
+    urgent_count = int(risk_df[risk_df["Urgent"].astype(str).str.upper() == "Y"]["News_ID"].nunique()) if "Urgent" in risk_df.columns else 0
+
     return {
         "total_alerts": total_alerts,
         "critical_alerts": critical_alerts,
         "suppliers_at_risk": suppliers_at_risk,
         "countries_affected": countries_affected,
         "most_exposed_supplier": most_exposed,
+        "spend_at_risk": spend_at_risk,
+        "total_spend": total_spend,
+        "single_source_pct": single_source_pct,
+        "alt_coverage_pct": alt_coverage_pct,
+        "stockout_countdown": stockout_countdown,
+        "category_risk": category_risk,
+        "event_counts": event_counts,
+        "urgent_count": urgent_count,
     }
 
 

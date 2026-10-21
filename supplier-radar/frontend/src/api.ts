@@ -23,6 +23,14 @@ export interface KPIs {
   suppliers_at_risk: number
   countries_affected: number
   most_exposed_supplier: { id: string; name: string; country: string; alert_count: number }
+  spend_at_risk: number
+  total_spend: number
+  single_source_pct: number
+  alt_coverage_pct: number
+  stockout_countdown: number | null
+  category_risk: Record<string, number>
+  event_counts: Record<string, number>
+  urgent_count: number
 }
 
 export interface AlertResult {

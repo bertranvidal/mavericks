@@ -1,68 +1,86 @@
 import { useEffect } from 'react'
-import { Bell, AlertTriangle, Building2, Globe, Star } from 'lucide-react'
-import { AlertsByPriorityChart, SuppliersByCountryChart, TopSuppliersChart } from '../components/Charts'
+import {
+  Bell, AlertTriangle, Building2, Globe,
+  DollarSign, Shield, Clock, RefreshCw, TrendingUp, Star,
+} from 'lucide-react'
+import {
+  AlertsByPriorityChart, SuppliersByCountryChart, TopSuppliersChart,
+  CategoryRiskChart, EventTypeChart, ExposureRadar,
+} from '../components/Charts'
 import { useApp } from '../context'
+
+function fmtEur(x: number): string {
+  if (x >= 1e6) return `${(x / 1e6).toFixed(1)}M`
+  if (x >= 1e3) return `${(x / 1e3).toFixed(0)}k`
+  return `${x}`
+}
+
+function BigKPI({ title, value, sub, icon: Icon }: { title: string; value: string | number; sub: string; icon: React.ComponentType<{ size: number; className?: string }> }) {
+  return (
+    <div className="card px-5 py-5">
+      <div className="flex items-center gap-2 mb-3">
+        <Icon size={16} className="text-blue-500" />
+        <p className="text-xs font-medium text-gray-400">{title}</p>
+      </div>
+      <p className="text-3xl font-bold text-gray-800">{value}</p>
+      <p className="text-[11px] text-gray-400 mt-1">{sub}</p>
+    </div>
+  )
+}
 
 export default function KPIsPage() {
   const { kpis, alerts, suppliers, loadData } = useApp()
-
   useEffect(() => { loadData() }, [loadData])
 
-  const bigCard = (title: string, value: string | number, sub: string, icon: React.ReactNode, accent: string) => (
-    <div
-      className="card p-7 flex flex-col gap-4 transition-transform duration-200 hover:-translate-y-1"
-    >
-      <div
-        className="w-14 h-14 rounded-2xl flex items-center justify-center"
-        style={{ background: `${accent}22`, border: `1px solid ${accent}44` }}
-      >
-        {icon}
-      </div>
-      <div>
-        <p className="text-5xl font-black" style={{ color: accent }}>{value}</p>
-        <p className="text-base font-semibold mt-2" style={{ color: '#ccc' }}>{title}</p>
-        <p className="text-sm mt-1" style={{ color: '#666' }}>{sub}</p>
-      </div>
-    </div>
-  )
-
   return (
-    <div>
-      <div
-        className="px-8 py-6 sticky top-0 z-30"
-        style={{ background: 'linear-gradient(90deg, #460073 0%, #7B2FBE 50%, #A100FF 100%)', borderBottom: '1px solid rgba(161,0,255,0.4)' }}
-      >
-        <h1 className="text-2xl font-bold text-white">Key Performance Indicators</h1>
-        <p className="text-sm mt-0.5" style={{ color: 'rgba(255,255,255,0.7)' }}>Live risk metrics for Helixa Pharmaceuticals supply chain</p>
+    <div className="p-8">
+      <div className="mb-6">
+        <h1 className="text-lg font-bold text-gray-800">Key Performance Indicators</h1>
+        <p className="text-xs text-gray-400 mt-0.5">Live risk metrics — Helixa Pharmaceuticals</p>
       </div>
 
-      <div className="p-8">
-        <div className="grid grid-cols-3 gap-5 mb-8">
-          {bigCard('Total Alerts Detected', kpis?.total_alerts ?? '—', 'All news events affecting supply chain', <Bell size={26} style={{ color: '#A100FF' }} />, '#A100FF')}
-          {bigCard('Critical Alerts', kpis?.critical_alerts ?? '—', 'Require immediate action', <AlertTriangle size={26} style={{ color: '#ff4d4d' }} />, '#ff4d4d')}
-          {bigCard('Suppliers at Risk', kpis?.suppliers_at_risk ?? '—', 'Affected by current news events', <Building2 size={26} style={{ color: '#ff8800' }} />, '#ff8800')}
-        </div>
+      <div className="grid grid-cols-4 gap-3 mb-3">
+        <BigKPI title="Total Alerts" value={kpis?.total_alerts ?? '—'} sub="All risk events" icon={Bell} />
+        <BigKPI title="Critical" value={kpis?.critical_alerts ?? '—'} sub="Immediate action" icon={AlertTriangle} />
+        <BigKPI title="Suppliers at Risk" value={kpis?.suppliers_at_risk ?? '—'} sub={`Affected of ${suppliers.length}`} icon={Building2} />
+        <BigKPI title="Countries" value={kpis?.countries_affected ?? '—'} sub="Geographic spread" icon={Globe} />
+      </div>
 
-        <div className="grid grid-cols-2 gap-5 mb-8">
-          {bigCard('Countries Affected', kpis?.countries_affected ?? '—', 'Geographic exposure', <Globe size={26} style={{ color: '#7B2FBE' }} />, '#7B2FBE')}
-          <div className="card p-7 flex flex-col gap-4 transition-transform duration-200 hover:-translate-y-1">
-            <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(255,77,77,0.15)', border: '1px solid rgba(255,77,77,0.3)' }}>
-              <Star size={26} style={{ color: '#ff4d4d' }} />
-            </div>
+      <div className="grid grid-cols-5 gap-3 mb-5">
+        <BigKPI title="Spend at Risk" value={kpis ? fmtEur(kpis.spend_at_risk) : '—'} sub={kpis ? `of ${fmtEur(kpis.total_spend)} EUR` : ''} icon={DollarSign} />
+        <BigKPI title="Single Source" value={kpis ? `${kpis.single_source_pct}%` : '—'} sub="Without backup" icon={Shield} />
+        <BigKPI title="Alt. Coverage" value={kpis ? `${kpis.alt_coverage_pct}%` : '—'} sub="Have alternate" icon={RefreshCw} />
+        <BigKPI title="Stockout Risk" value={kpis?.stockout_countdown != null ? `${kpis.stockout_countdown}d` : '—'} sub="Min days to stockout" icon={Clock} />
+        <BigKPI title="Urgent" value={kpis?.urgent_count ?? '—'} sub="Immediate response" icon={TrendingUp} />
+      </div>
+
+      {kpis?.most_exposed_supplier?.name && (
+        <div className="card px-5 py-4 flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <Star size={18} className="text-red-400" />
             <div>
-              <p className="text-5xl font-black" style={{ color: '#ff4d4d' }}>{kpis?.most_exposed_supplier?.alert_count ?? '—'}</p>
-              <p className="text-base font-semibold mt-2" style={{ color: '#ccc' }}>Most Exposed Supplier</p>
-              <p className="text-sm mt-1" style={{ color: '#bbb' }}>{kpis?.most_exposed_supplier?.name ?? '—'}</p>
-              <p className="text-xs mt-0.5" style={{ color: '#666' }}>{kpis?.most_exposed_supplier?.country ?? ''}</p>
+              <p className="text-[11px] text-gray-400">Most Exposed Supplier</p>
+              <p className="text-base font-bold text-gray-800">{kpis.most_exposed_supplier.name}</p>
+              <p className="text-xs text-gray-400">{kpis.most_exposed_supplier.country}</p>
             </div>
           </div>
+          <div className="text-right">
+            <p className="text-4xl font-bold text-red-500">{kpis.most_exposed_supplier.alert_count}</p>
+            <p className="text-[11px] text-gray-400">alerts</p>
+          </div>
         </div>
+      )}
 
-        <div className="grid grid-cols-3 gap-4">
-          <AlertsByPriorityChart alerts={alerts} />
-          <SuppliersByCountryChart alerts={alerts} suppliers={suppliers} />
-          <TopSuppliersChart alerts={alerts} suppliers={suppliers} />
-        </div>
+      <div className="grid grid-cols-3 gap-3 mb-3">
+        <AlertsByPriorityChart alerts={alerts} />
+        <SuppliersByCountryChart alerts={alerts} suppliers={suppliers} />
+        <TopSuppliersChart alerts={alerts} suppliers={suppliers} />
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <CategoryRiskChart kpis={kpis} />
+        <EventTypeChart kpis={kpis} />
+        <ExposureRadar kpis={kpis} suppliers={suppliers} />
       </div>
     </div>
   )

@@ -3,11 +3,11 @@ import Sidebar from './Sidebar'
 
 export default function Layout() {
   return (
-    <div className="flex min-h-screen" style={{ background: '#0f0f23' }}>
+    <div className="min-h-screen bg-gray-50">
       <Sidebar />
-      <main className="flex-1 ml-64 min-h-screen overflow-y-auto">
+      <div style={{ marginLeft: 192 }} className="min-h-screen overflow-x-hidden">
         <Outlet />
-      </main>
+      </div>
     </div>
   )
 }

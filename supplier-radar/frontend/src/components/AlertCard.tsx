@@ -4,18 +4,11 @@ import type { AlertResult } from '../api'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context'
 
-const PRIORITY_COLORS: Record<string, string> = {
-  CRITICAL: '#ff4d4d',
-  HIGH: '#ff8800',
-  MEDIUM: '#ffcc00',
-  LOW: '#00d4aa',
-}
+const P_C: Record<string, string> = { CRITICAL: '#ef4444', HIGH: '#f97316', MEDIUM: '#eab308', LOW: '#22c55e' }
 
 function parseIds(s: string | undefined): string[] {
-  if (!s) return []
-  return s.split(';').map(x => x.trim()).filter(Boolean)
+  if (!s) return []; return s.split(';').map(x => x.trim()).filter(Boolean)
 }
-
 function fmtEur(x: number): string {
   if (x >= 1e6) return `${(x / 1e6).toFixed(1)}M EUR`
   if (x >= 1e3) return `${(x / 1e3).toFixed(0)}k EUR`
@@ -23,105 +16,58 @@ function fmtEur(x: number): string {
 }
 
 export default function AlertCard({ alert }: { alert: AlertResult }) {
-  const [expanded, setExpanded] = useState(false)
-  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const nav = useNavigate()
   const { setFocusedSupplierId } = useApp()
-  const color = PRIORITY_COLORS[alert.Priority?.toUpperCase()] ?? '#888'
+  const c = P_C[alert.Priority?.toUpperCase()] ?? '#9ca3af'
   const ids = parseIds(alert.Affected_Supplier_IDs)
 
-  const handleViewAlternatives = (supplierId: string) => {
-    setFocusedSupplierId(supplierId)
-    navigate('/alternatives')
-  }
-
   return (
-    <div
-      className="card mb-3 overflow-hidden transition-all duration-200"
-      style={{ borderLeft: `4px solid ${color}` }}
-    >
-      <div
-        className="flex items-center justify-between p-4 cursor-pointer"
-        onClick={() => setExpanded(v => !v)}
-      >
-        <div className="flex items-center gap-3 min-w-0">
-          <span
-            className="text-xs font-bold px-2 py-0.5 rounded-full shrink-0"
-            style={{ background: `${color}22`, color, border: `1px solid ${color}44` }}
-          >
+    <div className="card mb-2 overflow-hidden" style={{ borderLeft: `3px solid ${c}` }}>
+      <div className="flex items-center justify-between px-4 py-3 cursor-pointer" onClick={() => setOpen(v => !v)}>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: `${c}10`, color: c, border: `1px solid ${c}25` }}>
             {alert.Priority}
           </span>
           <div className="min-w-0">
-            <p className="text-sm font-semibold truncate" style={{ color: '#eee' }}>{alert.Headline}</p>
-            <p className="text-xs mt-0.5" style={{ color: '#777' }}>
-              {alert.News_ID} &bull; {alert.Event_Type}
-            </p>
+            <p className="text-sm font-medium text-gray-800 truncate">{alert.Headline}</p>
+            <p className="text-[11px] text-gray-400">{alert.News_ID} &bull; {alert.Event_Type}</p>
           </div>
         </div>
-        <div className="shrink-0 ml-3" style={{ color: '#666' }}>
-          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-        </div>
+        <div className="shrink-0 ml-2 text-gray-300">{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</div>
       </div>
 
-      {expanded && (
-        <div className="px-4 pb-4 border-t" style={{ borderColor: 'rgba(123,47,190,0.2)' }}>
-          <p className="text-sm mt-3 mb-3 leading-relaxed" style={{ color: '#bbb' }}>{alert.Reasoning}</p>
+      {open && (
+        <div className="px-4 pb-4 border-t border-gray-50">
+          <p className="text-sm mt-3 mb-3 text-gray-600 leading-relaxed">{alert.Reasoning}</p>
 
-          <div className="grid grid-cols-2 gap-3 mb-3 text-xs">
-            <div className="p-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)' }}>
-              <p style={{ color: '#666' }}>Risk</p>
-              <p style={{ color: alert.Is_Risk === 'Y' ? '#ff4d4d' : '#00d4aa' }}>{alert.Is_Risk === 'Y' ? 'YES' : 'NO'}</p>
-            </div>
-            <div className="p-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)' }}>
-              <p style={{ color: '#666' }}>Urgent</p>
-              <p style={{ color: alert.Urgent === 'Y' ? '#ff8800' : '#00d4aa' }}>{alert.Urgent === 'Y' ? 'YES' : 'NO'}</p>
-            </div>
-            <div className="p-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)' }}>
-              <p style={{ color: '#666' }}>Spend at Risk</p>
-              <p style={{ color: '#eee' }}>{fmtEur(alert.Spend_At_Risk_EUR ?? 0)}</p>
-            </div>
-            <div className="p-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)' }}>
-              <p style={{ color: '#666' }}>Inventory Cover</p>
-              <p style={{ color: '#eee' }}>{alert.Min_Inventory_Days != null ? `${alert.Min_Inventory_Days} days` : 'N/A'}</p>
-            </div>
+          <div className="grid grid-cols-2 gap-2 mb-3 text-xs">
+            <div className="p-2 rounded-lg bg-gray-50"><p className="text-gray-400">Risk</p><p className={alert.Is_Risk === 'Y' ? 'text-red-500 font-semibold' : 'text-green-500'}>{alert.Is_Risk === 'Y' ? 'YES' : 'NO'}</p></div>
+            <div className="p-2 rounded-lg bg-gray-50"><p className="text-gray-400">Urgent</p><p className={alert.Urgent === 'Y' ? 'text-orange-500 font-semibold' : 'text-green-500'}>{alert.Urgent === 'Y' ? 'YES' : 'NO'}</p></div>
+            <div className="p-2 rounded-lg bg-gray-50"><p className="text-gray-400">Spend at Risk</p><p className="text-gray-700 font-medium">{fmtEur(alert.Spend_At_Risk_EUR ?? 0)}</p></div>
+            <div className="p-2 rounded-lg bg-gray-50"><p className="text-gray-400">Inventory</p><p className="text-gray-700 font-medium">{alert.Min_Inventory_Days != null ? `${alert.Min_Inventory_Days}d` : 'N/A'}</p></div>
           </div>
 
           {ids.length > 0 && (
             <div className="mb-3">
-              <p className="text-xs mb-2" style={{ color: '#666' }}>Affected Suppliers</p>
-              <div className="flex flex-wrap gap-2">
-                {ids.map(s => (
-                  <span
-                    key={s}
-                    className="text-xs px-2 py-0.5 rounded-full"
-                    style={{ background: 'rgba(161,0,255,0.15)', color: '#c084fc', border: '1px solid rgba(161,0,255,0.3)' }}
-                  >
-                    {s}
-                  </span>
-                ))}
-              </div>
+              <p className="text-[11px] text-gray-400 mb-1.5">Affected Suppliers</p>
+              <div className="flex flex-wrap gap-1.5">{ids.map(s => <span key={s} className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100">{s}</span>)}</div>
             </div>
           )}
 
-          {alert.Products_At_Risk && (
-            <div className="mb-3 text-xs" style={{ color: '#999' }}>
-              <strong style={{ color: '#bbb' }}>Products at risk:</strong> {alert.Products_At_Risk}
-            </div>
-          )}
+          {alert.Products_At_Risk && <p className="mb-3 text-xs text-gray-500"><span className="font-medium text-gray-700">Products at risk:</span> {alert.Products_At_Risk}</p>}
 
           {alert.Action && (
-            <div className="mb-3 p-3 rounded-lg text-xs" style={{ background: 'rgba(123,47,190,0.1)', border: '1px solid rgba(123,47,190,0.2)' }}>
-              <p className="font-semibold mb-1" style={{ color: '#A100FF' }}>Recommended Action</p>
-              <p style={{ color: '#ccc' }}>{alert.Action}</p>
+            <div className="mb-3 p-3 rounded-lg bg-blue-50 border border-blue-100 text-xs">
+              <p className="font-semibold text-blue-600 mb-1">Recommended Action</p>
+              <p className="text-gray-600">{alert.Action}</p>
             </div>
           )}
 
           {ids.length > 0 && (
-            <button
-              onClick={() => handleViewAlternatives(ids[0])}
-              className="flex items-center gap-1.5 text-xs font-semibold py-1.5 px-3 rounded-lg transition-colors duration-200"
-              style={{ background: 'rgba(0,212,170,0.1)', color: '#00d4aa', border: '1px solid rgba(0,212,170,0.3)' }}
-            >
-              View Alternatives <ArrowRight size={12} />
+            <button onClick={() => { setFocusedSupplierId(ids[0]); nav('/alternatives') }}
+              className="flex items-center gap-1 text-xs font-semibold py-1.5 px-3 rounded-lg text-blue-600 bg-blue-50 border border-blue-100 hover:bg-blue-100 transition-colors">
+              View Alternatives <ArrowRight size={11} />
             </button>
           )}
         </div>
