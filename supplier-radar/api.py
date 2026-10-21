@@ -1,4 +1,4 @@
-"""FastAPI backend for Supplier Radar dashboard."""
+"""Backend API del Supplier Radar."""
 
 from __future__ import annotations
 
@@ -24,83 +24,58 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory cache for last analysis results
 _last_results: pd.DataFrame | None = None
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _df_to_records(df: pd.DataFrame) -> list[dict]:
     return df.where(pd.notnull(df), None).to_dict(orient="records")
 
 
-# ---------------------------------------------------------------------------
-# Request / response models
-# ---------------------------------------------------------------------------
-
 class AnalyzeRequest(BaseModel):
-    source: str  # "live" | "test" | "validation"
-    mode: str    # "rules" | "models"
+    source: str
+    mode: str
 
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 @app.get("/api/suppliers")
 def get_suppliers() -> list[dict]:
-    df = radar_data.load_suppliers()
-    return _df_to_records(df)
+    return _df_to_records(radar_data.load_suppliers())
 
 
 @app.get("/api/materials")
 def get_materials() -> list[dict]:
-    df = radar_data.load_materials()
-    return _df_to_records(df)
+    return _df_to_records(radar_data.load_materials())
 
 
 @app.post("/api/analyze")
 def analyze(req: AnalyzeRequest) -> list[dict]:
     global _last_results
 
-    source_map = {
-        "live": config.LIVE,
-        "test": config.TEST,
-        "validation": config.VALID,
-    }
+    source_map = {"live": config.LIVE, "test": config.TEST, "validation": config.VALID}
     if req.source not in source_map:
-        raise HTTPException(status_code=400, detail=f"Unknown source '{req.source}'. Use live, test, or validation.")
+        raise HTTPException(400, f"Source desconocido: {req.source}")
     if req.mode not in ("rules", "models"):
-        raise HTTPException(status_code=400, detail=f"Unknown mode '{req.mode}'. Use rules or models.")
+        raise HTTPException(400, f"Mode desconocido: {req.mode}")
 
-    path = source_map[req.source]
-    news_df = radar_data.load_news(path)
+    news_df = radar_data.load_news(source_map[req.source])
     pool_df = pipeline.load_pool(include_valid=True)
-    results = pipeline.analyze_news(news_df, pool_df, mode=req.mode)
-
-    _last_results = results
-    return _df_to_records(results)
+    _last_results = pipeline.analyze_news(news_df, pool_df, mode=req.mode)
+    return _df_to_records(_last_results)
 
 
 @app.get("/api/results")
 def get_results() -> list[dict]:
     if _last_results is None:
-        raise HTTPException(status_code=404, detail="No analysis has been run yet.")
+        raise HTTPException(404, "Ejecuta un analisis primero.")
     return _df_to_records(_last_results)
 
 
 @app.get("/api/kpis")
 def get_kpis() -> dict[str, Any]:
     if _last_results is None:
-        raise HTTPException(status_code=404, detail="No analysis has been run yet.")
+        raise HTTPException(404, "Ejecuta un analisis primero.")
 
     df = _last_results.copy()
-
-    # Normalise Is_Risk to uppercase string for comparison
     df["_is_risk"] = df["Is_Risk"].astype(str).str.upper().str.strip()
-
     risk_df = df[df["_is_risk"] == "Y"]
 
     total_alerts = int(risk_df["News_ID"].nunique())
@@ -108,91 +83,65 @@ def get_kpis() -> dict[str, Any]:
         risk_df[risk_df["Priority"].astype(str).str.upper() == "CRITICAL"]["News_ID"].nunique()
     )
 
-    # Collect all affected supplier IDs from risk rows
     all_affected: list[str] = []
     for cell in risk_df["Affected_Supplier_IDs"]:
         all_affected.extend(impact.ids_of(cell))
 
     suppliers_at_risk = len(set(all_affected))
-
-    # Cross-reference with suppliers table to get countries
     suppliers_df = radar_data.load_suppliers()
     affected_set = set(all_affected)
     affected_suppliers = suppliers_df[suppliers_df["Supplier_ID"].astype(str).isin(affected_set)]
     countries_affected = int(affected_suppliers["Country"].nunique())
 
-    # Most exposed supplier
     most_exposed: dict[str, Any] = {}
     if all_affected:
         top_id, top_count = Counter(all_affected).most_common(1)[0]
         row = suppliers_df[suppliers_df["Supplier_ID"].astype(str) == top_id]
         if not row.empty:
             r = row.iloc[0]
-            most_exposed = {
-                "id": top_id,
-                "name": r.get("Supplier_Name", ""),
-                "country": r.get("Country", ""),
-                "alert_count": top_count,
-            }
+            most_exposed = {"id": top_id, "name": r.get("Supplier_Name", ""),
+                            "country": r.get("Country", ""), "alert_count": top_count}
         else:
             most_exposed = {"id": top_id, "name": "", "country": "", "alert_count": top_count}
 
-    # --- Extended KPIs ---
-
-    # Spend at risk
     spend_at_risk = float(risk_df["Spend_At_Risk_EUR"].sum()) if "Spend_At_Risk_EUR" in df.columns else 0
-
-    # Total spend (all suppliers)
     total_spend = float(suppliers_df["Annual_Spend_EUR"].sum())
 
-    # Single Source Exposure: % of total spend from single-source suppliers
-    single_source_suppliers = suppliers_df[suppliers_df["Single_Source"] == "Yes"]
-    single_source_spend = float(single_source_suppliers["Annual_Spend_EUR"].sum())
-    single_source_pct = round(single_source_spend / total_spend * 100, 1) if total_spend > 0 else 0
+    ss = suppliers_df[suppliers_df["Single_Source"] == "Yes"]
+    ss_pct = round(float(ss["Annual_Spend_EUR"].sum()) / total_spend * 100, 1) if total_spend > 0 else 0
 
-    # Alternative Coverage: % of suppliers with an approved alternate
     has_alt = suppliers_df["Approved_Alternate_ID"].notna() & (suppliers_df["Approved_Alternate_ID"] != "")
-    alt_coverage_pct = round(has_alt.sum() / len(suppliers_df) * 100, 1) if len(suppliers_df) > 0 else 0
+    alt_pct = round(has_alt.sum() / len(suppliers_df) * 100, 1) if len(suppliers_df) > 0 else 0
 
-    # Stockout Countdown: min inventory days among at-risk suppliers
-    at_risk_suppliers = suppliers_df[suppliers_df["Supplier_ID"].astype(str).isin(affected_set)]
-    stockout_countdown = None
-    if not at_risk_suppliers.empty and "Inventory_Cover_Days" in at_risk_suppliers.columns:
-        inv = at_risk_suppliers["Inventory_Cover_Days"].dropna()
+    ar = suppliers_df[suppliers_df["Supplier_ID"].astype(str).isin(affected_set)]
+    stockout = None
+    if not ar.empty and "Inventory_Cover_Days" in ar.columns:
+        inv = ar["Inventory_Cover_Days"].dropna()
         if len(inv):
-            stockout_countdown = int(inv.min())
+            stockout = int(inv.min())
 
-    # Category Risk Heatmap: spend at risk per category
-    category_risk: dict[str, float] = {}
+    cat_risk: dict[str, float] = {}
     for sid in affected_set:
         row = suppliers_df[suppliers_df["Supplier_ID"].astype(str) == sid]
         if not row.empty:
             cat = row.iloc[0].get("Category", "Other")
-            category_risk[cat] = category_risk.get(cat, 0) + float(row.iloc[0].get("Annual_Spend_EUR", 0))
+            cat_risk[cat] = cat_risk.get(cat, 0) + float(row.iloc[0].get("Annual_Spend_EUR", 0))
 
-    # Alerts by event type
-    event_counts: dict[str, int] = {}
+    ev_counts: dict[str, int] = {}
     for ev in risk_df.get("Event_Type", []):
         if ev:
-            event_counts[ev] = event_counts.get(ev, 0) + 1
+            ev_counts[ev] = ev_counts.get(ev, 0) + 1
 
-    # Urgent count
-    urgent_count = int(risk_df[risk_df["Urgent"].astype(str).str.upper() == "Y"]["News_ID"].nunique()) if "Urgent" in risk_df.columns else 0
+    urg = int(risk_df[risk_df["Urgent"].astype(str).str.upper() == "Y"]["News_ID"].nunique()) if "Urgent" in risk_df.columns else 0
 
     return {
-        "total_alerts": total_alerts,
-        "critical_alerts": critical_alerts,
-        "suppliers_at_risk": suppliers_at_risk,
-        "countries_affected": countries_affected,
+        "total_alerts": total_alerts, "critical_alerts": critical_alerts,
+        "suppliers_at_risk": suppliers_at_risk, "countries_affected": countries_affected,
         "most_exposed_supplier": most_exposed,
-        "spend_at_risk": spend_at_risk,
-        "total_spend": total_spend,
-        "single_source_pct": single_source_pct,
-        "alt_coverage_pct": alt_coverage_pct,
-        "stockout_countdown": stockout_countdown,
-        "category_risk": category_risk,
-        "event_counts": event_counts,
-        "urgent_count": urgent_count,
+        "spend_at_risk": spend_at_risk, "total_spend": total_spend,
+        "single_source_pct": ss_pct, "alt_coverage_pct": alt_pct,
+        "stockout_countdown": stockout, "category_risk": cat_risk,
+        "event_counts": ev_counts, "urgent_count": urg,
     }
 
 
@@ -201,44 +150,32 @@ def get_alternatives(supplier_id: str) -> list[dict]:
     suppliers_df = radar_data.load_suppliers()
     materials_df = radar_data.load_materials()
 
-    # Find materials where this supplier is the primary
-    primary_materials = materials_df[
-        materials_df["Primary_Supplier_ID"].astype(str) == supplier_id
-    ]
-
+    primary = materials_df[materials_df["Primary_Supplier_ID"].astype(str) == supplier_id]
     results = []
-    for _, mat_row in primary_materials.iterrows():
-        alt_id = str(mat_row.get("Alternate_Supplier_ID", "")) if pd.notna(mat_row.get("Alternate_Supplier_ID")) else None
-        alt_name = mat_row.get("Alternate_Supplier_Name", "")
-
+    for _, m in primary.iterrows():
+        alt_id = str(m.get("Alternate_Supplier_ID", "")) if pd.notna(m.get("Alternate_Supplier_ID")) else None
         alt_details: dict[str, Any] = {}
         if alt_id:
             alt_sup = suppliers_df[suppliers_df["Supplier_ID"].astype(str) == alt_id]
             if not alt_sup.empty:
                 alt_details = alt_sup.iloc[0].where(pd.notnull(alt_sup.iloc[0]), None).to_dict()
-
         results.append({
-            "material_id": mat_row.get("Material_ID"),
-            "material": mat_row.get("Material"),
+            "material_id": m.get("Material_ID"), "material": m.get("Material"),
             "alternate_supplier_id": alt_id,
-            "alternate_supplier_name": alt_name,
+            "alternate_supplier_name": m.get("Alternate_Supplier_Name", ""),
             "alternate_supplier_details": alt_details,
         })
-
     return results
 
 
 @app.get("/api/export")
 def export_results() -> StreamingResponse:
     if _last_results is None:
-        raise HTTPException(status_code=404, detail="No analysis has been run yet.")
-
+        raise HTTPException(404, "Ejecuta un analisis primero.")
     buf = io.BytesIO()
     pipeline.save_excel(_last_results, buf)
     buf.seek(0)
-
     return StreamingResponse(
-        buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=supplier_radar_results.xlsx"},
     )

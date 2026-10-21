@@ -1,12 +1,12 @@
-"""News scraper for Supplier Risk Radar.
+"""Scraper de noticias para el Supplier Risk Radar.
 
-Fetches supply-chain-relevant news from RSS feeds (international + Spanish national)
-and optionally NewsAPI. Deduplicates by title hash and inserts into Supabase.
+Recoge noticias de RSS (internacionales + nacionales) y NewsAPI,
+deduplica por hash del titulo e inserta en Supabase.
 
-  python3 scraper.py                     # scrape all sources
-  python3 scraper.py --dry-run           # print without saving
-  python3 scraper.py --source rss        # only RSS feeds
-  python3 scraper.py --source newsapi    # only NewsAPI
+  python3 scraper.py
+  python3 scraper.py --dry-run
+  python3 scraper.py --source rss
+  python3 scraper.py --source newsapi
 """
 from __future__ import annotations
 
@@ -22,16 +22,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY", "")
 
+# Fuentes RSS: prensa internacional, prensa espanola, farmaceutica, ciencia
 RSS_FEEDS = [
-    # ── International business & supply chain ──
+    # Internacionales - negocio y supply chain
     "https://feeds.bbci.co.uk/news/business/rss.xml",
     "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
     "https://www.ft.com/?format=rss",
@@ -39,110 +36,109 @@ RSS_FEEDS = [
     "https://www.pharmaceutical-technology.com/feed/",
     "https://www.chemistryworld.com/rss/news.xml",
     "https://www.scmp.com/rss/4/feed",
-
-    # ── International world news (disasters, geopolitics) ──
+    # Internacionales - mundo (desastres, geopolitica)
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
-
-    # ── Spain: El País ──
+    # El Pais
     "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/economia/portada",
     "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/ciencia/portada",
     "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/sociedad/portada",
     "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/internacional/portada",
-
-    # ── Spain: El Mundo ──
+    # El Mundo
     "https://e00-elmundo.uecdn.es/elmundo/rss/economia.xml",
     "https://e00-elmundo.uecdn.es/elmundo/rss/ciencia.xml",
     "https://e00-elmundo.uecdn.es/elmundo/rss/internacional.xml",
     "https://e00-elmundo.uecdn.es/elmundo/rss/espana.xml",
-
-    # ── Spain: Expansión (business) ──
+    # Expansion
     "https://e00-expansion.uecdn.es/rss/economia.xml",
     "https://e00-expansion.uecdn.es/rss/empresas.xml",
-
-    # ── Spain: OKDiario ──
+    # OKDiario
     "https://okdiario.com/economia/feed",
     "https://okdiario.com/ciencia/feed",
     "https://okdiario.com/internacional/feed",
-
-    # ── Spain: ABC ──
+    # ABC
     "https://www.abc.es/rss/feeds/abc_Economia.xml",
     "https://www.abc.es/rss/feeds/abc_Internacional.xml",
     "https://www.abc.es/rss/feeds/abc_Ciencia.xml",
-
-    # ── Spain: La Razón ──
+    # La Razon
     "https://www.larazon.es/rss/economia.xml",
     "https://www.larazon.es/rss/ciencia.xml",
-
-    # ── Spain: RTVE ──
+    # RTVE
     "https://www.rtve.es/rss/economia.xml",
-
-    # ── Spain: EFE (Spanish news agency) ──
+    # EFE
     "https://www.efe.com/rss/economia",
     "https://www.efe.com/rss/ciencia",
-
-    # ── Science & tech ──
+    # Ciencia
     "https://www.nature.com/nature.rss",
     "https://www.science.org/rss/news_current.xml",
     "https://www.newscientist.com/feed/home/",
-
-    # ── Pharma specific ──
+    # Farmaceutica
     "https://www.europeanpharmaceuticalreview.com/feed/",
     "https://www.in-pharmatechnologist.com/rss/news",
     "https://www.pharmamanufacturing.com/rss/",
 ]
 
-# Keywords in English and Spanish for filtering
-KEYWORDS_EN = [
+# Palabras clave para filtrar noticias relevantes (EN + ES)
+_KW_EN = [
     "supply chain", "supplier", "shortage", "disruption", "logistics",
     "procurement", "manufacturing", "factory", "plant", "warehouse",
     "fire", "explosion", "flood", "earthquake", "hurricane", "typhoon",
     "strike", "protest", "sanction", "embargo", "recall", "contamination",
     "shutdown", "closure", "bankruptcy", "insolvency", "cyber attack",
-    "pharmaceutical", "drug", "medicine", "API", "active ingredient",
+    "pharmaceutical", "drug", "medicine", "active ingredient",
     "excipient", "packaging", "GMP", "FDA", "EMA", "regulatory",
     "shipping", "freight", "port", "container", "tariff", "export ban",
-    "import restriction", "trade war",
+    "import restriction", "trade war", "chemical spill", "power outage",
+    "labor dispute", "raw material", "ingredient shortage",
+    "production halt", "quality issue", "batch failure", "cold chain",
+    "geopolitical", "civil unrest", "natural disaster", "pandemic",
+    "stockpile", "inventory", "backorder", "lead time",
 ]
 
-KEYWORDS_ES = [
+_KW_ES = [
     "cadena de suministro", "proveedor", "escasez", "desabastecimiento",
     "logística", "fabricación", "fábrica", "planta", "almacén",
     "incendio", "explosión", "inundación", "terremoto", "huracán",
     "huelga", "protesta", "sanción", "embargo", "retirada", "contaminación",
     "cierre", "quiebra", "ciberataque", "ransomware",
     "farmacéutica", "medicamento", "principio activo", "excipiente",
-    "envase", "regulación", "AEMPS", "EMA",
+    "envase", "regulación", "AEMPS",
     "transporte", "puerto", "contenedor", "arancel", "restricción",
     "importación", "exportación", "guerra comercial",
     "suministro", "distribución", "materia prima", "laboratorio",
+    "corte eléctrico", "vertido químico", "fallo de producción",
+    "lote defectuoso", "cadena de frío", "desastre natural",
+    "conflicto geopolítico", "disturbios", "pandemia",
+    "stock", "inventario", "plazo de entrega", "rotura de stock",
 ]
 
-ALL_KEYWORDS = KEYWORDS_EN + KEYWORDS_ES
-KEYWORD_PATTERN = re.compile("|".join(re.escape(k) for k in ALL_KEYWORDS), re.IGNORECASE)
+_KW_PATTERN = re.compile("|".join(re.escape(k) for k in _KW_EN + _KW_ES), re.IGNORECASE)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def title_hash(title: str) -> str:
+def _hash(title: str) -> str:
     return hashlib.sha256(title.strip().lower().encode()).hexdigest()[:16]
 
 
-def is_relevant(title: str, summary: str = "") -> bool:
-    return bool(KEYWORD_PATTERN.search(f"{title} {summary}"))
+def _relevant(title: str, summary: str = "") -> bool:
+    return bool(_KW_PATTERN.search(f"{title} {summary}"))
 
 
-def now_iso() -> str:
+def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-# ---------------------------------------------------------------------------
-# RSS scraping
-# ---------------------------------------------------------------------------
+def _row(title, summary, url, source, pub_date) -> dict:
+    return {
+        "title": title[:500], "summary": summary[:2000], "url": url[:1000],
+        "source": source, "published_at": pub_date or _now(), "scraped_at": _now(),
+        "title_hash": _hash(title),
+        "is_labeled": False, "is_risk": None, "urgent": None,
+        "event_type": None, "affected_supplier_ids": None,
+    }
+
 
 def fetch_rss(url: str, timeout: int = 15) -> list[dict]:
+    """Descarga y parsea un feed RSS/Atom."""
     articles = []
     try:
         r = requests.get(url, timeout=timeout, headers={"User-Agent": "SupplierRadar/1.0"})
@@ -155,62 +151,38 @@ def fetch_rss(url: str, timeout: int = 15) -> list[dict]:
             title = (item.findtext("title") or item.findtext("atom:title", namespaces=ns) or "").strip()
             summary = (item.findtext("description") or item.findtext("atom:summary", namespaces=ns) or "").strip()
             link = (item.findtext("link") or "").strip()
-            # Handle Atom links
             if not link:
                 link_el = item.find("atom:link[@href]", ns)
                 if link_el is not None:
                     link = link_el.get("href", "")
-            pub_date = (item.findtext("pubDate") or item.findtext("atom:updated", namespaces=ns) or "").strip()
-
+            pub = (item.findtext("pubDate") or item.findtext("atom:updated", namespaces=ns) or "").strip()
             summary = re.sub(r"<[^>]+>", "", summary).strip()
-            if not title:
-                continue
-            if is_relevant(title, summary):
-                articles.append({
-                    "title": title[:500],
-                    "summary": summary[:2000],
-                    "url": link[:1000],
-                    "source": url.split("/")[2],
-                    "published_at": pub_date or now_iso(),
-                    "scraped_at": now_iso(),
-                    "title_hash": title_hash(title),
-                    "is_labeled": False,
-                    "is_risk": None,
-                    "urgent": None,
-                    "event_type": None,
-                    "affected_supplier_ids": None,
-                })
+
+            if title and _relevant(title, summary):
+                articles.append(_row(title, summary, link, url.split("/")[2], pub))
     except Exception as e:
-        print(f"  [WARN] {url.split('/')[2]}: {type(e).__name__}")
+        print(f"  [!] {url.split('/')[2]}: {type(e).__name__}")
     return articles
 
 
 def scrape_rss() -> list[dict]:
-    all_articles = []
-    seen: set[str] = set()
+    """Recorre todos los feeds RSS y devuelve articulos unicos."""
+    result, seen = [], set()
     for url in RSS_FEEDS:
-        arts = fetch_rss(url)
-        new = 0
-        for a in arts:
+        for a in fetch_rss(url):
             if a["title_hash"] not in seen:
                 seen.add(a["title_hash"])
-                all_articles.append(a)
-                new += 1
-        if new:
-            print(f"  {url.split('/')[2]:40s} +{new}")
-    return all_articles
+                result.append(a)
+    print(f"  RSS total: {len(result)} articulos unicos")
+    return result
 
-
-# ---------------------------------------------------------------------------
-# NewsAPI
-# ---------------------------------------------------------------------------
 
 def scrape_newsapi() -> list[dict]:
+    """Consulta NewsAPI con varias queries orientadas al proyecto."""
     if not NEWSAPI_KEY:
-        print("  [SKIP] NEWSAPI_KEY not set")
+        print("  NewsAPI: sin API key, saltando")
         return []
 
-    articles = []
     queries = [
         "pharmaceutical supply chain disruption",
         "supplier factory fire recall",
@@ -221,40 +193,32 @@ def scrape_newsapi() -> list[dict]:
         "desabastecimiento medicamentos",
     ]
 
+    articles = []
     for q in queries:
         try:
             r = requests.get("https://newsapi.org/v2/everything",
-                params={"q": q, "language": "en", "sortBy": "publishedAt", "pageSize": 20, "apiKey": NEWSAPI_KEY},
-                timeout=15)
+                params={"q": q, "language": "en", "sortBy": "publishedAt",
+                         "pageSize": 20, "apiKey": NEWSAPI_KEY}, timeout=15)
             for item in r.json().get("articles", []):
                 title = (item.get("title") or "").strip()
                 summary = (item.get("description") or "").strip()
-                if title and is_relevant(title, summary):
-                    articles.append({
-                        "title": title[:500],
-                        "summary": summary[:2000],
-                        "url": (item.get("url") or "")[:1000],
-                        "source": item.get("source", {}).get("name", "newsapi"),
-                        "published_at": item.get("publishedAt") or now_iso(),
-                        "scraped_at": now_iso(),
-                        "title_hash": title_hash(title),
-                        "is_labeled": False, "is_risk": None, "urgent": None,
-                        "event_type": None, "affected_supplier_ids": None,
-                    })
+                if title and _relevant(title, summary):
+                    articles.append(_row(
+                        title, summary, item.get("url", ""),
+                        item.get("source", {}).get("name", "newsapi"),
+                        item.get("publishedAt"),
+                    ))
         except Exception as e:
-            print(f"  [WARN] NewsAPI '{q[:30]}': {type(e).__name__}")
+            print(f"  [!] NewsAPI '{q[:25]}': {type(e).__name__}")
 
-    seen: set[str] = set()
+    seen = set()
     return [a for a in articles if not (a["title_hash"] in seen or seen.add(a["title_hash"]))]
 
 
-# ---------------------------------------------------------------------------
-# Supabase
-# ---------------------------------------------------------------------------
-
 def save_to_supabase(articles: list[dict]) -> int:
+    """Inserta articulos en Supabase con upsert (sin duplicados)."""
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("[ERROR] SUPABASE_URL / SUPABASE_KEY not set")
+        print("[!] Faltan SUPABASE_URL / SUPABASE_KEY")
         return 0
 
     headers = {
@@ -263,33 +227,23 @@ def save_to_supabase(articles: list[dict]) -> int:
         "Content-Type": "application/json",
         "Prefer": "resolution=merge-duplicates,return=minimal",
     }
+    endpoint = f"{SUPABASE_URL}/rest/v1/scraped_news?on_conflict=title_hash"
 
     inserted = 0
     for i in range(0, len(articles), 50):
         batch = articles[i:i + 50]
-        r = requests.post(
-            f"{SUPABASE_URL}/rest/v1/scraped_news?on_conflict=title_hash",
-            headers=headers, json=batch,
-        )
+        r = requests.post(endpoint, headers=headers, json=batch)
         if r.status_code in (200, 201):
             inserted += len(batch)
         elif r.status_code == 409:
-            # Some duplicates in batch — insert one by one
             for a in batch:
-                r2 = requests.post(
-                    f"{SUPABASE_URL}/rest/v1/scraped_news?on_conflict=title_hash",
-                    headers=headers, json=[a],
-                )
+                r2 = requests.post(endpoint, headers=headers, json=[a])
                 if r2.status_code in (200, 201):
                     inserted += 1
         else:
-            print(f"  [ERROR] batch {i}: {r.status_code} {r.text[:200]}")
+            print(f"  [!] batch {i}: {r.status_code} {r.text[:150]}")
     return inserted
 
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser()
@@ -297,34 +251,28 @@ def main():
     parser.add_argument("--source", choices=["rss", "newsapi", "all"], default="all")
     args = parser.parse_args()
 
-    print(f"[{now_iso()}] Supplier Radar Scraper")
+    print(f"[{_now()}] scraper.py")
     articles: list[dict] = []
 
     if args.source in ("rss", "all"):
-        print("\n--- RSS feeds ---")
         articles.extend(scrape_rss())
-
     if args.source in ("newsapi", "all"):
-        print("\n--- NewsAPI ---")
         articles.extend(scrape_newsapi())
 
-    # Final dedup
     seen: set[str] = set()
     unique = [a for a in articles if not (a["title_hash"] in seen or seen.add(a["title_hash"]))]
-    print(f"\nTotal unique relevant articles: {len(unique)}")
+    print(f"  Total unicos: {len(unique)}")
 
     if args.dry_run:
         for a in unique[:15]:
             print(f"  [{a['source']:30s}] {a['title'][:90]}")
         if len(unique) > 15:
-            print(f"  ... +{len(unique) - 15} more")
+            print(f"  ... +{len(unique) - 15} mas")
         return
 
     if unique:
         n = save_to_supabase(unique)
-        print(f"Saved {n} articles to Supabase")
-    else:
-        print("No new articles.")
+        print(f"  Guardados en Supabase: {n}")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,5 @@
--- Supabase schema for Supplier Radar
--- Run this in the Supabase SQL editor
+-- Esquema de tablas para Supabase
 
--- Scraped news articles (deduplicated by title_hash)
 CREATE TABLE IF NOT EXISTS scraped_news (
     id BIGSERIAL PRIMARY KEY,
     title TEXT NOT NULL,
@@ -11,13 +9,11 @@ CREATE TABLE IF NOT EXISTS scraped_news (
     published_at TIMESTAMPTZ,
     scraped_at TIMESTAMPTZ DEFAULT now(),
     title_hash TEXT UNIQUE NOT NULL,
-    -- Labeling fields (null = not yet labeled)
     is_labeled BOOLEAN DEFAULT FALSE,
     is_risk BOOLEAN,
     urgent BOOLEAN,
     event_type TEXT,
     affected_supplier_ids TEXT,
-    -- ML prediction fields
     predicted_risk REAL,
     predicted_urgent REAL,
     predicted_event_type TEXT,
@@ -26,12 +22,10 @@ CREATE TABLE IF NOT EXISTS scraped_news (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Index for deduplication and queries
 CREATE INDEX IF NOT EXISTS idx_scraped_news_hash ON scraped_news (title_hash);
 CREATE INDEX IF NOT EXISTS idx_scraped_news_scraped ON scraped_news (scraped_at DESC);
 CREATE INDEX IF NOT EXISTS idx_scraped_news_labeled ON scraped_news (is_labeled);
 
--- Suppliers table (mirrors the Excel data)
 CREATE TABLE IF NOT EXISTS suppliers (
     id SERIAL PRIMARY KEY,
     supplier_id TEXT UNIQUE NOT NULL,
@@ -50,7 +44,6 @@ CREATE TABLE IF NOT EXISTS suppliers (
     quality_score REAL
 );
 
--- Materials table
 CREATE TABLE IF NOT EXISTS materials (
     id SERIAL PRIMARY KEY,
     material_id TEXT UNIQUE NOT NULL,
@@ -61,7 +54,6 @@ CREATE TABLE IF NOT EXISTS materials (
     used_in_products TEXT
 );
 
--- Analysis results (historical)
 CREATE TABLE IF NOT EXISTS analysis_results (
     id BIGSERIAL PRIMARY KEY,
     news_id TEXT,
@@ -78,12 +70,8 @@ CREATE TABLE IF NOT EXISTS analysis_results (
     spend_at_risk_eur REAL,
     priority TEXT,
     action TEXT,
-    analysis_mode TEXT,  -- 'rules' | 'models'
+    analysis_mode TEXT,
     analyzed_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_results_analyzed ON analysis_results (analyzed_at DESC);
-
--- Enable Row Level Security (optional, for production)
--- ALTER TABLE scraped_news ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE suppliers ENABLE ROW LEVEL SECURITY;
