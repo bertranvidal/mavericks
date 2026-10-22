@@ -897,59 +897,69 @@ with tabs[3]:
 
     st.divider()
 
-    # Row 3: risk details
-    _r3 = st.columns(3)
-    with _r3[0]:
-        st.markdown(f"**{'Inventario minimo en riesgo' if lang == 'es' else 'Min inventory at risk'}**")
-        if _min_inv is not None:
-            _inv_color = "🔴" if _min_inv < 30 else "🟡" if _min_inv < 60 else "🟢"
-            st.markdown(f"### {_inv_color} {_min_inv} {'dias' if lang == 'es' else 'days'}")
-            st.caption(
-                "Dias de stock del proveedor mas expuesto" if lang == "es" else
-                "Stock days of the most exposed supplier"
-            )
-        else:
-            st.markdown("### — ")
+    # Most Exposed Supplier (tarjeta destacada)
+    if supplier_news:
+        _top_all = sorted(supplier_news.items(), key=lambda x: (-len(x[1]["news_ids"]), x[0]))
+        _top_sid, _top_entry = _top_all[0]
+        _top_sup = SUP.loc[_top_sid]
+        _top_prio = PRIORITY_LABELS.get(_top_entry["priority"], _top_entry["priority"])
 
-    with _r3[1]:
+        st.markdown(
+            f"""<div style="border: 2px solid #3b82f6; border-radius: 12px; padding: 20px; margin: 10px 0;
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);">
+            <p style="color: #6b7280; font-size: 13px; margin: 0;">{'Proveedor mas expuesto' if lang == 'es' else 'Most Exposed Supplier'}</p>
+            <h2 style="margin: 4px 0; color: #1e293b;">{_top_sid} · {_top_sup['Supplier_Name']}</h2>
+            <p style="color: #64748b; margin: 0;">
+                {COUNTRY_LABELS.get(_top_sup['Country'], _top_sup['Country'])} ·
+                {len(_top_entry['news_ids'])} {'alertas' if lang == 'es' else 'alerts'} ·
+                {'Prioridad' if lang == 'es' else 'Priority'}: {_top_prio} ·
+                {'Material' if lang == 'es' else 'Material'}: {_top_sup['Material_Supplied']}
+            </p></div>""",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.info("Sin proveedores afectados" if lang == "es" else "No affected suppliers")
+
+    st.divider()
+
+    # Graficos complementarios
+    _g1, _g2 = st.columns(2)
+
+    with _g1:
         st.markdown(f"**{'Alertas por prioridad' if lang == 'es' else 'Alerts by priority'}**")
         _prio_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
         for _p in res[res.Is_Risk == "Y"]["Priority"]:
             if _p in _prio_counts:
                 _prio_counts[_p] += 1
-        for _p, _c in _prio_counts.items():
-            _bar = "█" * _c + "░" * max(0, 10 - _c)
-            _label = PRIORITY_LABELS.get(_p, _p)
-            st.text(f"{_label:10s} {_bar} {_c}")
+        _prio_df = pd.DataFrame([
+            {"priority": PRIORITY_LABELS.get(k, k), "count": v}
+            for k, v in _prio_counts.items()
+        ])
+        st.bar_chart(_prio_df.set_index("priority"), height=250)
 
-    with _r3[2]:
-        st.markdown(f"**{'Tipos de evento' if lang == 'es' else 'Event types'}**")
-        _ev_counts = {}
-        for _ev in res[res.Is_Risk == "Y"]["Event_Type"]:
-            _ev_label = EVENT_LABELS.get(_ev, _ev) if EVENT_LABELS else _ev
-            _ev_counts[_ev_label] = _ev_counts.get(_ev_label, 0) + 1
-        if _ev_counts:
-            for _ev, _c in sorted(_ev_counts.items(), key=lambda x: -x[1]):
-                st.text(f"  {_c}x {_ev}")
-        else:
-            st.caption("Sin riesgos detectados" if lang == "es" else "No risks detected")
+    with _g2:
+        st.markdown(f"**{'Proveedores en riesgo por pais' if lang == 'es' else 'Suppliers at risk by country'}**")
+        _country_counts = {}
+        for _sid in _at_risk_ids:
+            if _sid in SUP.index:
+                _c = COUNTRY_LABELS.get(SUP.loc[_sid, "Country"], SUP.loc[_sid, "Country"])
+                _country_counts[_c] = _country_counts.get(_c, 0) + 1
+        if _country_counts:
+            _cc_df = pd.DataFrame([{"country": k, "suppliers": v} for k, v in sorted(_country_counts.items(), key=lambda x: -x[1])])
+            st.bar_chart(_cc_df.set_index("country"), height=250)
 
-    st.divider()
-
-    # Row 4: top exposed suppliers
-    st.markdown(f"**{'Proveedores mas expuestos' if lang == 'es' else 'Most exposed suppliers'}**")
+    # Top 5 proveedores
     if supplier_news:
-        _top = sorted(supplier_news.items(), key=lambda x: (-len(x[1]["news_ids"]), x[0]))[:5]
-        _top_cols = st.columns(len(_top))
-        for _col, (_sid, _entry) in zip(_top_cols, _top):
+        st.markdown(f"**{'Top 5 proveedores mas expuestos' if lang == 'es' else 'Top 5 most exposed suppliers'}**")
+        _top5 = sorted(supplier_news.items(), key=lambda x: (-len(x[1]["news_ids"]), x[0]))[:5]
+        _top_cols = st.columns(len(_top5))
+        for _col, (_sid, _entry) in zip(_top_cols, _top5):
             with _col:
                 _sup = SUP.loc[_sid]
                 _prio_label = PRIORITY_LABELS.get(_entry["priority"], _entry["priority"])
-                _prio_color = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🔵"}.get(_entry["priority"], "⚪")
-                st.metric(_sup["Supplier_Name"], f"{len(_entry['news_ids'])} {'alertas' if lang == 'es' else 'alerts'}")
-                st.caption(f"{_prio_color} {_prio_label} · {COUNTRY_LABELS.get(_sup['Country'], _sup['Country'])}")
-    else:
-        st.caption("Sin proveedores afectados" if lang == "es" else "No affected suppliers")
+                with st.container(border=True):
+                    st.metric(_sup["Supplier_Name"], f"{len(_entry['news_ids'])} {'alertas' if lang == 'es' else 'alerts'}")
+                    st.caption(f"{_prio_label} · {COUNTRY_LABELS.get(_sup['Country'], _sup['Country'])}")
 
 with tabs[4]:
     st.subheader("Alertas en vivo — noticias scrapeadas" if lang == "es" else "Live news alerts — scraped articles")
