@@ -19,9 +19,13 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: |
-          python3 export_training.py --include-predicted
-          python3 classify_supabase.py --mode rules --unlabeled
+        run: python3 export_training.py --include-predicted
+      - name: Clasificar noticias nuevas
+        working-directory: supplier-radar
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python3 classify_supabase.py --mode rules --unlabeled || true
       - uses: actions/upload-artifact@v4
         with:
           name: training-data
