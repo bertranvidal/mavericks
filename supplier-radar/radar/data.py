@@ -85,7 +85,7 @@ def is_labelled(df: pd.DataFrame) -> bool:
     return "Is_Risk" in df.columns and df["Is_Risk"].notna().all()
 
 
-EXTRA_FILES = ["aug_synth.csv", "llm_synth.csv", "neg_news.csv", "supabase_train.csv"]  # datos extra opcionales (augment / gen_llm_data / fetch_negatives)
+EXTRA_FILES = ["aug_synth.csv", "llm_synth.csv", "neg_news.csv", "supabase_train.csv", "claude_labels.csv"]  # datos extra opcionales (augment / gen_llm_data / fetch_negatives)
 
 
 def load_extra() -> list[tuple[str, pd.DataFrame]]:

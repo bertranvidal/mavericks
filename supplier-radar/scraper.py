@@ -215,6 +215,43 @@ def scrape_newsapi() -> list[dict]:
     return [a for a in articles if not (a["title_hash"] in seen or seen.add(a["title_hash"]))]
 
 
+def scrape_gdelt() -> list[dict]:
+    """Consulta GDELT DOC API para noticias de supply chain / pharma."""
+    queries = [
+        "pharmaceutical supply chain",
+        "supplier factory fire",
+        "drug shortage",
+        "export restriction sanctions",
+        "port strike logistics",
+    ]
+    import time
+    articles = []
+    for q in queries:
+        try:
+            time.sleep(2)
+            r = requests.get("https://api.gdeltproject.org/api/v2/doc/doc", params={
+                "query": q, "mode": "artlist", "maxrecords": 20,
+                "format": "json", "timespan": "5d",
+            }, timeout=15)
+            if r.status_code != 200:
+                continue
+            data = r.json()
+            for item in data.get("articles", []):
+                title = (item.get("title") or "").strip()
+                url = item.get("url") or ""
+                domain = item.get("domain") or "gdelt"
+                pub = item.get("seendate") or ""
+                if title and _relevant(title, ""):
+                    articles.append(_row(title, "", url, domain, pub))
+        except Exception as e:
+            print(f"  [!] GDELT '{q[:25]}': {type(e).__name__}")
+
+    seen = set()
+    deduped = [a for a in articles if not (a["title_hash"] in seen or seen.add(a["title_hash"]))]
+    print(f"  GDELT: {len(deduped)} articulos")
+    return deduped
+
+
 def save_to_supabase(articles: list[dict]) -> int:
     """Inserta articulos en Supabase con upsert (sin duplicados)."""
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -248,7 +285,7 @@ def save_to_supabase(articles: list[dict]) -> int:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--source", choices=["rss", "newsapi", "all"], default="all")
+    parser.add_argument("--source", choices=["rss", "newsapi", "gdelt", "all"], default="all")
     args = parser.parse_args()
 
     print(f"[{_now()}] scraper.py")
@@ -258,6 +295,8 @@ def main():
         articles.extend(scrape_rss())
     if args.source in ("newsapi", "all"):
         articles.extend(scrape_newsapi())
+    if args.source in ("gdelt", "all"):
+        articles.extend(scrape_gdelt())
 
     seen: set[str] = set()
     unique = [a for a in articles if not (a["title_hash"] in seen or seen.add(a["title_hash"]))]

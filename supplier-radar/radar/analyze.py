@@ -103,11 +103,35 @@ KW_SHORT = ["48 hours", "two days", "three-day", "3-day", "safety checks", "prec
 KW_LONG = ["weeks", "months", "indefinite"]
 
 
+NOT_SUPPLY_CHAIN = [
+    "football", "soccer", "basketball", "tennis", "rugby", "cricket", "olympic",
+    "election", "vote", "ballot", "political party", "campaign",
+    "teacher", "profesor", "student protest", "university protest",
+    "education reform", "school", "classroom",
+    "cinema", "film festival", "concert", "album", "celebrity",
+    "tourism", "hotel", "restaurant", "nightlife",
+    "fashion week", "art exhibition", "museum", "art fair", "art basel", "gallery",
+    "pension reform", "retirement age",
+    "taxi driver", "taxista", "uber",
+]
+NOT_SUPPLY_RE = "|".join(NOT_SUPPLY_CHAIN)
+
+
 def rules_verdict(row: pd.Series, ctx: Context) -> Verdict:
     t = row.text.lower()
     hints = ctx.matcher.hints(row.text)
+    # solo proveedores con match fuerte (nombre o ciudad, no solo pais)
     solid = [h["id"] for h in hints if h["score"] >= 2]
     event = next((e for e, kws in KW_EVENTS if any(k in t for k in kws)), None)
+    # descartar noticias que no afectan a la cadena de suministro (educacion, deporte, politica, etc.)
+    if event and any(k in t for k in NOT_SUPPLY_CHAIN):
+        has_supply_kw = any(k in t for k in ["supplier", "factory", "plant", "pharma", "chemical",
+                                              "drug", "medicine", "shipping", "port", "warehouse",
+                                              "proveedor", "fabrica", "planta", "farmac", "quimic",
+                                              "medicamento", "puerto", "almacen"])
+        if not has_supply_kw:
+            return Verdict(event_type="Not relevant", is_risk=False, confidence="medium",
+                           reasoning="keyword rules: event detected but not supply-chain related")
     positive = any(k in t for k in KW_POS) and event in (None, "Acquisition by competitor")
     if positive and solid:
         return Verdict(event_type="Positive news", is_risk=False, affected_supplier_ids=solid[:1], confidence="low", reasoning="positive keywords")

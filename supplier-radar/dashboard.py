@@ -445,7 +445,8 @@ if is_labelled(news):
 
 live_tab = "Live news alerts" if lang == "en" else "Alertas en vivo"
 weather_tab = "Weather alerts" if lang == "en" else "Alertas climáticas"
-tabs = st.tabs([T["alerts_tab"], T["actions_tab"], T["map_tab"], live_tab, weather_tab])
+review_tab = "Review & label" if lang == "en" else "Revisar y etiquetar"
+tabs = st.tabs([T["alerts_tab"], T["actions_tab"], T["map_tab"], live_tab, weather_tab, review_tab])
 with tabs[0]:
     st.subheader(T["alerts"])
     only_risk = st.checkbox(T["only_risks"], value=True, key="alert_filter_risks_only")
@@ -814,7 +815,7 @@ with tabs[2]:
                     },
                 },
             )
-            st.pydeck_chart(deck, use_container_width=True, height=520)
+            st.pydeck_chart(deck, use_container_width=True)
         unmapped = sorted(set(country_exposure) - set(country_locations))
         if unmapped:
             st.warning(T["unmapped"] + ", ".join(COUNTRY_LABELS.get(country, country) for country in unmapped))
@@ -1015,6 +1016,71 @@ with tabs[4]:
         if lang == "es" else
         "Data from [Open-Meteo](https://open-meteo.com/) (free API, no key required)"
     )
+
+with tabs[5]:
+    st.subheader("Revisar noticias — Active Learning" if lang == "es" else "Review articles — Active Learning")
+    st.caption(
+        "Noticias donde el modelo tiene menos confianza (0.3–0.7). Etiquetar estas primero mejora más el modelo."
+        if lang == "es" else
+        "Articles where the model has low confidence (0.3–0.7). Labeling these first maximizes model improvement."
+    )
+    if _sb_url and _sb_key:
+        _al_h = {"apikey": _sb_key, "Authorization": f"Bearer {_sb_key}"}
+        _al_news = requests.get(
+            f"{_sb_url}/rest/v1/scraped_news?select=*&confidence=gte.0.15&confidence=lte.0.7&is_labeled=eq.false&order=confidence.asc&limit=30",
+            headers=_al_h,
+        ).json() if _sb_url else []
+
+        if not _al_news:
+            _al_news = requests.get(
+                f"{_sb_url}/rest/v1/scraped_news?select=*&is_labeled=eq.false&order=id.desc&limit=30",
+                headers=_al_h,
+            ).json()
+
+        al1, al2 = st.columns(2)
+        al1.metric("Pendientes de revisar" if lang == "es" else "Pending review", len(_al_news))
+        risk_pct = sum(1 for r in _al_news if (r.get("predicted_risk") or 0) >= 0.5) / max(len(_al_news), 1) * 100
+        al2.metric("Prediccion riesgo" if lang == "es" else "Predicted risk", f"{risk_pct:.0f}%")
+
+        for row in _al_news:
+            conf = row.get("confidence") or 0
+            p_risk = row.get("predicted_risk") or 0
+            title = row.get("title") or ""
+            summary = row.get("summary") or ""
+            event = row.get("predicted_event_type") or "?"
+            event_text = EVENT_LABELS.get(event, event)
+            url = row.get("url") or ""
+            source = row.get("source") or ""
+
+            risk_icon = "🔴" if p_risk >= 0.5 else "⚪"
+            conf_bar = "🟩" * int(conf * 10) + "⬜" * (10 - int(conf * 10))
+
+            with st.container(border=True):
+                rc1, rc2 = st.columns([3, 1])
+                with rc1:
+                    st.markdown(f"{risk_icon} **{title}**")
+                    if summary:
+                        st.write(summary[:300])
+                    link_text = f"[{'Leer' if lang == 'es' else 'Read'}]({url})" if url else ""
+                    st.caption(f"{source} · {event_text} {link_text}")
+                with rc2:
+                    st.caption(f"{'Confianza' if lang == 'es' else 'Confidence'}: {conf:.0%}")
+                    st.caption(conf_bar)
+                    is_risk_val = st.selectbox(
+                        "Riesgo?" if lang == "es" else "Risk?",
+                        ["—", "Sí" if lang == "es" else "Yes", "No"],
+                        key=f"al_risk_{row['id']}",
+                    )
+                    if is_risk_val != "—":
+                        is_r = is_risk_val in ("Sí", "Yes")
+                        requests.patch(
+                            f"{_sb_url}/rest/v1/scraped_news?id=eq.{row['id']}",
+                            headers={**_al_h, "Content-Type": "application/json"},
+                            json={"is_labeled": True, "is_risk": is_r},
+                        )
+                        st.success("✓" if lang == "en" else "✓ Guardado")
+    else:
+        st.warning("Configura SUPABASE_URL y SUPABASE_KEY en .env" if lang == "es" else "Set SUPABASE_URL and SUPABASE_KEY in .env")
 
 buf = io.BytesIO()
 save_excel(res, buf)
