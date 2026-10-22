@@ -1,0 +1,28 @@
+name: Re-export datos y feedback semanal
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests python-dotenv pandas openpyxl
+      - working-directory: supplier-radar
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python3 export_training.py --include-predicted
+          python3 classify_supabase.py --mode rules --unlabeled
+      - uses: actions/upload-artifact@v4
+        with:
+          name: training-data
+          path: supplier-radar/data/supabase_train.csv
