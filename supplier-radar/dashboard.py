@@ -446,7 +446,8 @@ if is_labelled(news):
 live_tab = "Live news alerts" if lang == "en" else "Alertas en vivo"
 weather_tab = "Weather alerts" if lang == "en" else "Alertas climáticas"
 review_tab = "Review & label" if lang == "en" else "Revisar y etiquetar"
-tabs = st.tabs([T["alerts_tab"], T["actions_tab"], T["map_tab"], live_tab, weather_tab, review_tab])
+kpi_tab = "KPI Dashboard" if lang == "en" else "Panel KPIs"
+tabs = st.tabs([T["alerts_tab"], T["actions_tab"], T["map_tab"], kpi_tab, live_tab, weather_tab, review_tab])
 with tabs[0]:
     st.subheader(T["alerts"])
     only_risk = st.checkbox(T["only_risks"], value=True, key="alert_filter_risks_only")
@@ -824,6 +825,133 @@ with tabs[2]:
         st.info(T["no_suppliers"])
 
 with tabs[3]:
+    _kpi_title = "Panel de indicadores clave" if lang == "es" else "Key Performance Indicators"
+    st.subheader(_kpi_title)
+    st.caption(
+        "Metricas de riesgo de la cadena de suministro basadas en el analisis actual."
+        if lang == "es" else
+        "Supply chain risk metrics based on the current analysis."
+    )
+
+    _total_news = len(res)
+    _total_risks = int((res.Is_Risk == "Y").sum())
+    _total_urgent = int((res.Urgent == "Y").sum())
+    _total_suppliers = len(SUP)
+    _at_risk_ids = set()
+    for _cell in res[res.Is_Risk == "Y"]["Affected_Supplier_IDs"]:
+        _at_risk_ids.update(ids_of(_cell))
+    _suppliers_at_risk = len(_at_risk_ids)
+    _countries_at_risk = len({SUP.loc[s, "Country"] for s in _at_risk_ids if s in SUP.index})
+    _spend_at_risk = sum(float(SUP.loc[s, "Annual_Spend_EUR"]) for s in _at_risk_ids if s in SUP.index)
+    _total_spend = float(SUP["Annual_Spend_EUR"].sum())
+    _single_source = SUP[SUP["Single_Source"] == "Y"]
+    _ss_spend = float(_single_source["Annual_Spend_EUR"].sum())
+    _ss_pct = round(_ss_spend / _total_spend * 100, 1) if _total_spend > 0 else 0
+    _has_alt = SUP["Approved_Alternate_ID"].notna() & (SUP["Approved_Alternate_ID"] != "")
+    _alt_pct = round(_has_alt.sum() / len(SUP) * 100, 1)
+    _at_risk_sups = SUP.loc[[s for s in _at_risk_ids if s in SUP.index]]
+    _min_inv = int(_at_risk_sups["Inventory_Cover_Days"].min()) if not _at_risk_sups.empty else None
+
+    # Row 1: main KPIs
+    _r1 = st.columns(4)
+    _r1[0].metric(
+        "Noticias analizadas" if lang == "es" else "News analyzed",
+        _total_news,
+    )
+    _r1[1].metric(
+        "Riesgos detectados" if lang == "es" else "Risks detected",
+        _total_risks,
+        delta=f"{_total_risks/_total_news*100:.0f}%" if _total_news else None,
+    )
+    _r1[2].metric(
+        "Urgentes" if lang == "es" else "Urgent",
+        _total_urgent,
+    )
+    _r1[3].metric(
+        "Proveedores afectados" if lang == "es" else "Suppliers at risk",
+        f"{_suppliers_at_risk} / {_total_suppliers}",
+    )
+
+    # Row 2: financial KPIs
+    _r2 = st.columns(4)
+    _r2[0].metric(
+        "Gasto en riesgo" if lang == "es" else "Spend at risk",
+        eur(_spend_at_risk),
+        delta=f"{_spend_at_risk/_total_spend*100:.1f}% del total" if _total_spend else None,
+        delta_color="inverse",
+    )
+    _r2[1].metric(
+        "Paises afectados" if lang == "es" else "Countries affected",
+        _countries_at_risk,
+    )
+    _r2[2].metric(
+        "Proveedor unico" if lang == "es" else "Single source exposure",
+        f"{_ss_pct}%",
+        help="Porcentaje del gasto sin proveedor alternativo" if lang == "es" else "Spend percentage with no backup supplier",
+    )
+    _r2[3].metric(
+        "Cobertura alternativa" if lang == "es" else "Alternative coverage",
+        f"{_alt_pct}%",
+        help="Proveedores con alternativa aprobada" if lang == "es" else "Suppliers with approved alternate",
+    )
+
+    st.divider()
+
+    # Row 3: risk details
+    _r3 = st.columns(3)
+    with _r3[0]:
+        st.markdown(f"**{'Inventario minimo en riesgo' if lang == 'es' else 'Min inventory at risk'}**")
+        if _min_inv is not None:
+            _inv_color = "🔴" if _min_inv < 30 else "🟡" if _min_inv < 60 else "🟢"
+            st.markdown(f"### {_inv_color} {_min_inv} {'dias' if lang == 'es' else 'days'}")
+            st.caption(
+                "Dias de stock del proveedor mas expuesto" if lang == "es" else
+                "Stock days of the most exposed supplier"
+            )
+        else:
+            st.markdown("### — ")
+
+    with _r3[1]:
+        st.markdown(f"**{'Alertas por prioridad' if lang == 'es' else 'Alerts by priority'}**")
+        _prio_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+        for _p in res[res.Is_Risk == "Y"]["Priority"]:
+            if _p in _prio_counts:
+                _prio_counts[_p] += 1
+        for _p, _c in _prio_counts.items():
+            _bar = "█" * _c + "░" * max(0, 10 - _c)
+            _label = PRIORITY_LABELS.get(_p, _p)
+            st.text(f"{_label:10s} {_bar} {_c}")
+
+    with _r3[2]:
+        st.markdown(f"**{'Tipos de evento' if lang == 'es' else 'Event types'}**")
+        _ev_counts = {}
+        for _ev in res[res.Is_Risk == "Y"]["Event_Type"]:
+            _ev_label = EVENT_LABELS.get(_ev, _ev) if EVENT_LABELS else _ev
+            _ev_counts[_ev_label] = _ev_counts.get(_ev_label, 0) + 1
+        if _ev_counts:
+            for _ev, _c in sorted(_ev_counts.items(), key=lambda x: -x[1]):
+                st.text(f"  {_c}x {_ev}")
+        else:
+            st.caption("Sin riesgos detectados" if lang == "es" else "No risks detected")
+
+    st.divider()
+
+    # Row 4: top exposed suppliers
+    st.markdown(f"**{'Proveedores mas expuestos' if lang == 'es' else 'Most exposed suppliers'}**")
+    if supplier_news:
+        _top = sorted(supplier_news.items(), key=lambda x: (-len(x[1]["news_ids"]), x[0]))[:5]
+        _top_cols = st.columns(len(_top))
+        for _col, (_sid, _entry) in zip(_top_cols, _top):
+            with _col:
+                _sup = SUP.loc[_sid]
+                _prio_label = PRIORITY_LABELS.get(_entry["priority"], _entry["priority"])
+                _prio_color = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🔵"}.get(_entry["priority"], "⚪")
+                st.metric(_sup["Supplier_Name"], f"{len(_entry['news_ids'])} {'alertas' if lang == 'es' else 'alerts'}")
+                st.caption(f"{_prio_color} {_prio_label} · {COUNTRY_LABELS.get(_sup['Country'], _sup['Country'])}")
+    else:
+        st.caption("Sin proveedores afectados" if lang == "es" else "No affected suppliers")
+
+with tabs[4]:
     st.subheader("Alertas en vivo — noticias scrapeadas" if lang == "es" else "Live news alerts — scraped articles")
     st.caption(
         "Noticias recogidas automáticamente de prensa internacional y nacional, clasificadas por riesgo."
@@ -909,8 +1037,8 @@ with tabs[3]:
         st.warning("Configura SUPABASE_URL y SUPABASE_KEY en .env para ver las alertas en vivo." if lang == "es"
                    else "Set SUPABASE_URL and SUPABASE_KEY in .env to see live alerts.")
 
-with tabs[4]:
-    st.subheader("Alertas climáticas en zonas de proveedores" if lang == "es" else "Weather alerts in supplier zones")
+with tabs[5]:
+    st.subheader("Alertas climáticas" if lang == "es" else "Weather alerts")
     st.caption(
         "Previsión meteorológica de Open-Meteo para las ciudades de los proveedores. Destaca condiciones adversas."
         if lang == "es" else
@@ -1017,7 +1145,7 @@ with tabs[4]:
         "Data from [Open-Meteo](https://open-meteo.com/) (free API, no key required)"
     )
 
-with tabs[5]:
+with tabs[6]:
     st.subheader("Revisar noticias — Active Learning" if lang == "es" else "Review articles — Active Learning")
     st.caption(
         "Noticias donde el modelo tiene menos confianza (0.3–0.7). Etiquetar estas primero mejora más el modelo."
