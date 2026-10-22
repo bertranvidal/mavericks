@@ -4,16 +4,21 @@
       --server.enableCORS false --server.enableXsrfProtection false
 """
 import io
+import os
 
 import pandas as pd
 import pydeck as pdk
+import requests
 import streamlit as st
+from dotenv import load_dotenv
 
 from radar.config import LIVE, TEST, VALID
 from radar.data import is_labelled, load_materials, load_news, load_suppliers
 from radar.alerts import add_alerts
 from radar.impact import eur, ids_of
 from radar.pipeline import analyze_news, load_pool, save_excel
+
+load_dotenv()
 
 st.set_page_config(page_title="Supplier Risk Radar", layout="wide")
 
@@ -438,7 +443,9 @@ if is_labelled(news):
     acc_u = (m.Urgent == g.loc[m.index, "Urgent"]).mean()
     st.success(T["labelled_accuracy"].format(risk=acc_r, urgent=acc_u))
 
-tabs = st.tabs([T["alerts_tab"], T["actions_tab"], T["map_tab"]])
+live_tab = "Live news alerts" if lang == "en" else "Alertas en vivo"
+weather_tab = "Weather alerts" if lang == "en" else "Alertas climáticas"
+tabs = st.tabs([T["alerts_tab"], T["actions_tab"], T["map_tab"], live_tab, weather_tab])
 with tabs[0]:
     st.subheader(T["alerts"])
     only_risk = st.checkbox(T["only_risks"], value=True, key="alert_filter_risks_only")
@@ -631,11 +638,9 @@ with tabs[1]:
                             ("URGENT · " if lang == "en" else "URGENTE · ")
                             if entry["urgent_news_ids"] else ""
                         )
-                        badge_colors = {"CRITICAL": "red", "HIGH": "orange", "MEDIUM": "yellow", "LOW": "blue"}
-                        st.badge(
-                            f"{urgency_label}{PRIORITY_LABELS[entry['priority']]}",
-                            color=badge_colors.get(entry["priority"], "gray"),
-                        )
+                        _bc = {"CRITICAL": "#ef4444", "HIGH": "#f97316", "MEDIUM": "#eab308", "LOW": "#3b82f6"}
+                        _c = _bc.get(entry["priority"], "#6b7280")
+                        st.markdown(f'<span style="background:{_c};color:white;padding:2px 10px;border-radius:10px;font-size:12px;font-weight:600">{urgency_label}{PRIORITY_LABELS[entry["priority"]]}</span>', unsafe_allow_html=True)
                         st.markdown(f"**{supplier_id} · {supplier['Supplier_Name']}**")
                         st.caption(
                             f"{COUNTRY_LABELS.get(supplier['Country'], supplier['Country'])} · "
@@ -816,6 +821,200 @@ with tabs[2]:
         st.dataframe(country_table, use_container_width=True, hide_index=True)
     else:
         st.info(T["no_suppliers"])
+
+with tabs[3]:
+    st.subheader("Alertas en vivo — noticias scrapeadas" if lang == "es" else "Live news alerts — scraped articles")
+    st.caption(
+        "Noticias recogidas automáticamente de prensa internacional y nacional, clasificadas por riesgo."
+        if lang == "es" else
+        "News automatically collected from international and national press, classified by risk."
+    )
+    _sb_url = os.environ.get("SUPABASE_URL", "")
+    _sb_key = os.environ.get("SUPABASE_KEY", "")
+    if _sb_url and _sb_key:
+        _sb_h = {"apikey": _sb_key, "Authorization": f"Bearer {_sb_key}"}
+        _sb_risks = requests.get(
+            f"{_sb_url}/rest/v1/scraped_news?select=*&predicted_risk=gte.0.5&order=confidence.desc&limit=50",
+            headers=_sb_h,
+        ).json() if _sb_url else []
+        _sb_all = requests.get(
+            f"{_sb_url}/rest/v1/scraped_news?select=id",
+            headers={**_sb_h, "Prefer": "count=exact", "Range": "0-0"},
+        )
+        _total = _sb_all.headers.get("content-range", "0-0/0").split("/")[-1]
+
+        lk1, lk2, lk3 = st.columns(3)
+        lk1.metric("Total noticias" if lang == "es" else "Total articles", _total)
+        lk2.metric("Alertas" if lang == "es" else "Alerts", len(_sb_risks))
+        lk3.metric("Fuentes" if lang == "es" else "Sources",
+                    len({r.get("source") for r in _sb_risks}) if _sb_risks else 0)
+
+        if not _sb_risks:
+            st.success("No se han detectado riesgos en las noticias recientes." if lang == "es" else "No risks detected in recent news.")
+        else:
+            _prio_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+            _prio_colors = {"CRITICAL": "#f4a6a6", "HIGH": "#f8cbad", "MEDIUM": "#ffe699", "LOW": "#dbeafe"}
+
+            def _live_priority(row):
+                text = (row.get("title") or "").lower() + " " + (row.get("summary") or "").lower()
+                sids = ids_of(row.get("predicted_supplier_ids") or "")
+                stop = any(k in text for k in ["halt", "suspend", "shut", "close", "recall", "ban"])
+                single = any(sid in SUP.index and SUP.loc[sid, "Single_Source"] == "Y" for sid in sids)
+                crit = any(sid in SUP.index and SUP.loc[sid, "Criticality"] in ("Critical", "High") for sid in sids)
+                if stop and (single or crit):
+                    return "CRITICAL"
+                if stop:
+                    return "HIGH"
+                if crit or single:
+                    return "MEDIUM"
+                return "LOW"
+
+            for row in sorted(_sb_risks, key=lambda r: _prio_order.get(_live_priority(r), 4)):
+                prio = _live_priority(row)
+                bg = _prio_colors.get(prio, "#fff")
+                prio_label = PRIORITY_LABELS.get(prio, prio)
+                event = row.get("predicted_event_type") or "?"
+                event_text = EVENT_LABELS.get(event, event)
+                title = row.get("title") or ""
+                summary = row.get("summary") or ""
+                url = row.get("url") or ""
+                source = row.get("source") or ""
+                sids = ids_of(row.get("predicted_supplier_ids") or "")
+
+                with st.container(border=True):
+                    _bc2 = {"CRITICAL": "#ef4444", "HIGH": "#f97316", "MEDIUM": "#eab308", "LOW": "#3b82f6"}
+                    _c2 = _bc2.get(prio, "#6b7280")
+                    st.markdown(f'<span style="background:{_c2};color:white;padding:2px 10px;border-radius:10px;font-size:12px;font-weight:600">{prio_label}</span>', unsafe_allow_html=True)
+                    st.markdown(f"**{title}**")
+                    st.write(summary[:500])
+                    c1, c2 = st.columns([2, 1])
+                    with c1:
+                        if url:
+                            st.markdown(f"[{'Leer noticia completa' if lang == 'es' else 'Read full article'}]({url})")
+                        st.caption(f"{'Fuente' if lang == 'es' else 'Source'}: {source} · {'Tipo' if lang == 'es' else 'Type'}: {event_text}")
+                    with c2:
+                        if sids:
+                            for sid in sids:
+                                if sid in SUP.index:
+                                    sup = SUP.loc[sid]
+                                    alt_id = sup.get("Approved_Alternate_ID")
+                                    st.error(f"🔴 {sid} — {sup['Supplier_Name']} ({sup['Country']})")
+                                    if isinstance(alt_id, str) and alt_id in SUP.index:
+                                        alt = SUP.loc[alt_id]
+                                        st.success(f"🟢 {alt_id} — {alt['Supplier_Name']} ({alt['Country']})")
+                                    else:
+                                        st.warning("⚠️ Sin alternativa aprobada" if lang == "es" else "⚠️ No approved alternate")
+    else:
+        st.warning("Configura SUPABASE_URL y SUPABASE_KEY en .env para ver las alertas en vivo." if lang == "es"
+                   else "Set SUPABASE_URL and SUPABASE_KEY in .env to see live alerts.")
+
+with tabs[4]:
+    st.subheader("Alertas climáticas en zonas de proveedores" if lang == "es" else "Weather alerts in supplier zones")
+    st.caption(
+        "Previsión meteorológica de Open-Meteo para las ciudades de los proveedores. Destaca condiciones adversas."
+        if lang == "es" else
+        "Open-Meteo weather forecast for supplier cities. Highlights adverse conditions."
+    )
+    _supplier_cities = {}
+    for sid in SUP.index:
+        s = SUP.loc[sid]
+        city = s.get("City", "")
+        country = s.get("Country", "")
+        if city and country:
+            key = f"{city}, {country}"
+            _supplier_cities.setdefault(key, []).append({"id": sid, "name": s["Supplier_Name"], "material": s["Material_Supplied"]})
+
+    _city_coords = {
+        "Ahmedabad, India": (23.02, 72.57), "Vadodara, India": (22.31, 73.18),
+        "Shanghai, China": (31.23, 121.47), "Mumbai, India": (19.08, 72.88),
+        "Frankfurt, Germany": (50.11, 8.68), "Mainz, Germany": (50.0, 8.27),
+        "Basel, Switzerland": (47.56, 7.59), "Milan, Italy": (45.46, 9.19),
+        "Bergamo, Italy": (45.69, 9.67), "Barcelona, Spain": (41.39, 2.17),
+        "Dublin, Ireland": (53.35, -6.26), "Brussels, Belgium": (50.85, 4.35),
+        "Antwerp, Belgium": (51.22, 4.40), "Hsinchu, Taiwan": (24.80, 120.97),
+        "Hanoi, Vietnam": (21.03, 105.85), "Ho Chi Minh City, Vietnam": (10.82, 106.63),
+        "Monterrey, Mexico": (25.69, -100.32), "Sao Paulo, Brazil": (-23.55, -46.63),
+        "Singapore, Singapore": (1.35, 103.82), "Tokyo, Japan": (35.68, 139.69),
+        "Warsaw, Poland": (52.23, 21.01), "Casablanca, Morocco": (33.57, -7.59),
+        "Oslo, Norway": (59.91, 10.75), "Amsterdam, Netherlands": (52.37, 4.90),
+        "San Juan, Puerto Rico (USA)": (18.47, -66.11), "Cork, Ireland": (51.90, -8.47),
+    }
+
+    _weather_alerts = []
+    for city_key, sups_list in _supplier_cities.items():
+        coords = _city_coords.get(city_key)
+        if not coords:
+            continue
+        try:
+            wr = requests.get("https://api.open-meteo.com/v1/forecast", params={
+                "latitude": coords[0], "longitude": coords[1],
+                "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,weather_code",
+                "timezone": "auto", "forecast_days": 3,
+            }, timeout=5)
+            if wr.status_code != 200:
+                continue
+            wd = wr.json().get("daily", {})
+            dates = wd.get("time", [])
+            temps_max = wd.get("temperature_2m_max", [])
+            precip = wd.get("precipitation_sum", [])
+            wind = wd.get("wind_speed_10m_max", [])
+            codes = wd.get("weather_code", [])
+
+            for i, date in enumerate(dates):
+                alert_type = None
+                if i < len(codes) and codes[i] in (95, 96, 99):
+                    alert_type = "Tormenta severa" if lang == "es" else "Severe storm"
+                elif i < len(precip) and precip[i] and precip[i] > 50:
+                    alert_type = "Lluvia intensa" if lang == "es" else "Heavy rain"
+                elif i < len(wind) and wind[i] and wind[i] > 80:
+                    alert_type = "Viento fuerte" if lang == "es" else "Strong wind"
+                elif i < len(temps_max) and temps_max[i] and temps_max[i] > 42:
+                    alert_type = "Calor extremo" if lang == "es" else "Extreme heat"
+                elif i < len(temps_max) and temps_max[i] is not None and temps_max[i] < -10:
+                    alert_type = "Frío extremo" if lang == "es" else "Extreme cold"
+
+                if alert_type:
+                    _weather_alerts.append({
+                        "city": city_key, "date": date, "type": alert_type,
+                        "temp_max": temps_max[i] if i < len(temps_max) else None,
+                        "precip": precip[i] if i < len(precip) else None,
+                        "wind": wind[i] if i < len(wind) else None,
+                        "suppliers": sups_list,
+                    })
+        except Exception:
+            continue
+
+    if _weather_alerts:
+        st.warning(f"{'Se detectaron' if lang == 'es' else 'Detected'} {len(_weather_alerts)} {'alertas climáticas' if lang == 'es' else 'weather alerts'}")
+        for wa in _weather_alerts:
+            with st.container(border=True):
+                _wc = "#ef4444" if "severa" in wa["type"].lower() or "severe" in wa["type"].lower() else "#f97316"
+                st.markdown(f'<span style="background:{_wc};color:white;padding:2px 10px;border-radius:10px;font-size:12px;font-weight:600">{wa["type"]}</span>', unsafe_allow_html=True)
+                st.markdown(f"**{wa['city']}** — {wa['date']}")
+                mc1, mc2, mc3 = st.columns(3)
+                if wa["temp_max"] is not None:
+                    mc1.metric("Temp. max", f"{wa['temp_max']:.0f}°C")
+                if wa["precip"] is not None:
+                    mc2.metric("Precipitación" if lang == "es" else "Precipitation", f"{wa['precip']:.0f} mm")
+                if wa["wind"] is not None:
+                    mc3.metric("Viento" if lang == "es" else "Wind", f"{wa['wind']:.0f} km/h")
+                st.caption(
+                    f"{'Proveedores afectados' if lang == 'es' else 'Affected suppliers'}: " +
+                    ", ".join(f"{s['id']} {s['name']}" for s in wa["suppliers"])
+                )
+    else:
+        st.success(
+            "No se prevén condiciones meteorológicas adversas en las próximas 72 h en las zonas de proveedores."
+            if lang == "es" else
+            "No adverse weather conditions forecast in the next 72h for supplier zones."
+        )
+
+    st.divider()
+    st.caption(
+        "Datos de [Open-Meteo](https://open-meteo.com/) (API gratuita, sin necesidad de API key)"
+        if lang == "es" else
+        "Data from [Open-Meteo](https://open-meteo.com/) (free API, no key required)"
+    )
 
 buf = io.BytesIO()
 save_excel(res, buf)

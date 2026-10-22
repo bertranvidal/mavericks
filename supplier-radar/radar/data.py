@@ -85,7 +85,7 @@ def is_labelled(df: pd.DataFrame) -> bool:
     return "Is_Risk" in df.columns and df["Is_Risk"].notna().all()
 
 
-EXTRA_FILES = ["aug_synth.csv", "llm_synth.csv", "neg_news.csv"]  # datos extra opcionales (augment / gen_llm_data / fetch_negatives)
+EXTRA_FILES = ["aug_synth.csv", "llm_synth.csv", "neg_news.csv", "supabase_train.csv"]  # datos extra opcionales (augment / gen_llm_data / fetch_negatives)
 
 
 def load_extra() -> list[tuple[str, pd.DataFrame]]:
@@ -96,6 +96,9 @@ def load_extra() -> list[tuple[str, pd.DataFrame]]:
         if f.exists():
             df = pd.read_csv(f)
             for c in ("Summary", "Affected_Supplier_IDs"):
-                df[c] = df[c].fillna("")
+                if c in df.columns:
+                    df[c] = df[c].fillna("")
+            if "text" not in df.columns and "Headline" in df.columns:
+                df["text"] = (df["Headline"].str.rstrip(". ") + ". " + df.get("Summary", "")).str.strip()
             out.append((name, df))
     return out

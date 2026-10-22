@@ -125,20 +125,25 @@ def rules_verdict(row: pd.Series, ctx: Context) -> Verdict:
 
 
 # ----------------------------------------------------------------------------- modo 'models' (nuestros modelos afinados)
-def finalize_models(t: dict, probs: dict, hints: dict, thr: float = 0.5) -> dict:
-    """t = salida del modelo de texto; probs = prob. de vinculacion por proveedor."""
+def finalize_models(t: dict, probs: dict, hints: dict, thr=0.5) -> dict:
+    """t = salida del modelo de texto; probs = prob. de vinculacion por proveedor.
+    thr puede ser un float (mismo para todo) o un dict con claves risk/urgent/link."""
+    if isinstance(thr, dict):
+        thr_r, thr_u, thr_l = thr.get("risk", 0.5), thr.get("urgent", 0.5), thr.get("link", 0.5)
+    else:
+        thr_r = thr_u = thr_l = thr
     ev = t["event"]
     positive = ev == "Positive news"
-    is_risk = t["p_risk"] >= thr and not positive
-    ids = sorted(i for i, p in probs.items() if p >= thr)
+    is_risk = t["p_risk"] >= thr_r and not positive
+    ids = sorted(i for i, p in probs.items() if p >= thr_l)
     note = ""
     if is_risk and not ids:
         is_risk, note = False, "no supplier linked"
     if not is_risk and not positive:
         ids = []
-    urgent = is_risk and t["p_urgent"] >= thr
+    urgent = is_risk and t["p_urgent"] >= thr_u
     margin = min(abs(t["p_risk"] - 0.5), abs(t["p_urgent"] - 0.5) if is_risk else 0.5) * 2
-    top = sorted(((p, i) for i, p in probs.items() if p >= thr), reverse=True)[:3]
+    top = sorted(((p, i) for i, p in probs.items() if p >= thr_l), reverse=True)[:3]
     why = "; ".join(f"{i} {p:.2f}" + (f" ({'/'.join(hints[i])})" if i in hints else " (no direct hint)") for p, i in top)
     return {
         "Is_Risk": "Y" if is_risk else "N",
