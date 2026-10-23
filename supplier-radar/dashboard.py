@@ -348,9 +348,8 @@ def display_action(row) -> str:
 
 with st.sidebar:
     st.header(T["input"])
-    src_options = ["Live Day feed", "Test", "Validación (con respuestas)", "Subir Excel"]
+    src_options = ["Test", "Validación (con respuestas)", "Subir Excel"]
     src_labels = {
-        "Live Day feed": T["live"],
         "Test": T["test"],
         "Validación (con respuestas)": T["validation"],
         "Subir Excel": T["upload"],
