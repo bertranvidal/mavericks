@@ -106,8 +106,9 @@ KW_LONG = ["weeks", "months", "indefinite"]
 NOT_SUPPLY_CHAIN = [
     "football", "soccer", "basketball", "tennis", "rugby", "cricket", "olympic",
     "election", "vote", "ballot", "political party", "campaign",
-    "teacher", "profesor", "student protest", "university protest",
-    "education reform", "school", "classroom",
+    "teacher", "profesor", "profesores", "student protest", "university protest",
+    "education reform", "school", "classroom", "educacion", "educación",
+    "colegio", "universidad", "docente",
     "cinema", "film festival", "concert", "album", "celebrity",
     "tourism", "hotel", "restaurant", "nightlife",
     "fashion week", "art exhibition", "museum", "art fair", "art basel", "gallery",
