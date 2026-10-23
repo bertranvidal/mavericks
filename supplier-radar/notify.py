@@ -42,9 +42,11 @@ SMTP_PASS = os.environ.get("SMTP_PASS", "")
 
 def fetch_critical_alerts() -> list[dict]:
     """Trae alertas con riesgo alto de las ultimas 24h."""
+    from datetime import datetime, timedelta, timezone
+    yesterday = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     r = requests.get(
-        f"{SUPABASE_URL}/rest/v1/scraped_news?select=*&predicted_risk=gte.0.5&order=id.desc&limit=20",
+        f"{SUPABASE_URL}/rest/v1/scraped_news?select=*&predicted_risk=gte.0.5&scraped_at=gte.{yesterday}&order=id.desc&limit=20",
         headers=h,
     )
     if r.status_code != 200:
