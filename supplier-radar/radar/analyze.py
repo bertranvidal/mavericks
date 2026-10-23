@@ -113,7 +113,10 @@ NOT_SUPPLY_CHAIN = [
     "tourism", "hotel", "restaurant", "nightlife",
     "fashion week", "art exhibition", "museum", "art fair", "art basel", "gallery",
     "pension reform", "retirement age",
-    "taxi driver", "taxista", "uber",
+    "taxi driver", "taxista", "uber", "cabify", "vtc", "sector del taxi",
+    "taxi protesta", "paros del taxi", "huelga del taxi",
+    "disturbio", "revuelta", "saqueo", "enfrentamiento callejero",
+    "chalecos amarillos",
 ]
 NOT_SUPPLY_RE = "|".join(NOT_SUPPLY_CHAIN)
 
